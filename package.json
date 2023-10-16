@@ -1,0 +1,12 @@
+{
+  "name": "@kybarg/camera",
+  "version": "0.0.1",
+  "description": "Node.js Addons to work with web cameras",
+  "main": "addon.js",
+  "private": false,
+  "gypfile": true,
+  "dependencies": {
+    "bindings": "~1.2.1",
+    "node-addon-api": "^7.0.0"
+  }
+}

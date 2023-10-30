@@ -8,6 +8,7 @@
 #include <mftransform.h>
 #include <napi.h>
 #include <thread>
+#include "device.h"
 
 class Camera : public Napi::ObjectWrap<Camera> {
  public:
@@ -15,20 +16,15 @@ class Camera : public Napi::ObjectWrap<Camera> {
   Camera(const Napi::CallbackInfo& info);
   ~Camera();
 
- private:
+  CaptureDevice device;
+  Napi::ThreadSafeFunction tsfn;
+  Napi::ThreadSafeFunction tsfnCapturing;
+  std::thread nativeThread;
+
   Napi::Value EnumerateDevices(const Napi::CallbackInfo& info);
   Napi::Value SelectDevice(const Napi::CallbackInfo& info);
-  void StartCapture(const Napi::CallbackInfo& info);
-  void ThreadFunction();  // Helper function for the thread
-
-  std::thread nativeThread;
-  Napi::ThreadSafeFunction tsfn;
-
-  IMFMediaSource* ppSource = NULL;
-  IMFActivate** ppDevices;
-  IMFSourceReader* pVideoReader;
-
-  bool capturing;
+  Napi::Value StartCapture(const Napi::CallbackInfo& info);
+  Napi::Value StopCapture(const Napi::CallbackInfo& info);
 };
 
 #endif

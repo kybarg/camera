@@ -10,7 +10,8 @@
       ],
       "sources": [
         "addon.cc",
-        "camera.cc"
+        "camera.cc",
+        "device.cc"
       ],
       "libraries": [
         "-lmf",
@@ -24,7 +25,12 @@
       ],
       "defines": [
         "NAPI_DISABLE_CPP_EXCEPTIONS"
-      ]
+      ],
+      "msvs_settings": {
+        "VCCLCompilerTool": {
+          "ExceptionHandling": 1
+        }
+      }
     }
   ]
 }

@@ -130,8 +130,4 @@ dist
 .pnp.*
 
 # temporary
-addon1.cc
-addon2.cc
-camera copy.cc
-output.png
 build/

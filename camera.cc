@@ -264,8 +264,9 @@ Napi::Value Camera::StartCapture(const Napi::CallbackInfo& info) {
 
             jsCallback.Call({env.Null(), result});
             buffer->Unlock();
-            buffer->Release();
           }
+
+          delete resultData;
         };
 
         hr = device.StartCapture([this, &callback](IMFMediaBuffer* buf) {

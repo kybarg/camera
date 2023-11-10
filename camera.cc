@@ -266,6 +266,9 @@ Napi::Value Camera::StartCapture(const Napi::CallbackInfo& info) {
             buffer->Unlock();
           }
 
+          buffer->Release();
+          buffer = NULL;
+
           delete resultData;
         };
 

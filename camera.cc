@@ -273,12 +273,12 @@ Napi::Value Camera::StartCapture(const Napi::CallbackInfo& info) {
         };
 
         hr = device.StartCapture([this, &callback](IMFMediaBuffer* buf) {
-          ResultData* result = new ResultData();
+          std::unique_ptr<ResultData> result = std::make_unique<ResultData>();
           result->width = device.width;
           result->height = device.height;
           result->buffer = buf;
 
-          tsfnCapturing.BlockingCall(result, callback);
+          tsfnCapturing.BlockingCall(result.release(), callback);
         });
       }
 

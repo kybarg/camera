@@ -255,20 +255,23 @@ Napi::Value Camera::StartCapture(const Napi::CallbackInfo& info) {
           HRESULT hr = buffer->Lock(&bufData, nullptr, &bufLength);
 
           if (SUCCEEDED(hr)) {
+            buffer->Unlock();
             Napi::Object result = Napi::Object::New(env);
             result.Set("width", Napi::Number::New(env, width));
             result.Set("height", Napi::Number::New(env, height));
 
-            Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::New(env, bufData, bufLength);
+            Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::Copy(env, bufData, bufLength);
             result.Set("buffer", bufferN);
 
+            // Call the JavaScript callback with the result object
             jsCallback.Call({env.Null(), result});
-            buffer->Unlock();
           }
 
+          // Release the IMFMediaBuffer
           buffer->Release();
-          buffer = NULL;
+          resultData->buffer = nullptr;
 
+          // Delete the ResultData object
           delete resultData;
         };
 

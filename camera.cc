@@ -278,7 +278,13 @@ Napi::Value Camera::StartCapture(const Napi::CallbackInfo& info) {
           result->height = device.height;
           result->buffer = buf;
 
-          tsfnCapturing.BlockingCall(result.release(), callback);
+          napi_status status = tsfnCapturing.BlockingCall(result.release(), callback);
+
+          if (status == napi_ok) {
+            return S_OK;
+          } else {
+            return E_FAIL;
+          }
         });
       }
 

@@ -166,7 +166,7 @@ CleanUp:
   return hr;
 }
 
-HRESULT CaptureDevice::StartCapture(std::function<void(IMFMediaBuffer*)> callback) {
+HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> callback) {
   HRESULT hr = S_OK;
 
   DWORD mftStatus = 0;
@@ -239,7 +239,10 @@ HRESULT CaptureDevice::StartCapture(std::function<void(IMFMediaBuffer*)> callbac
             hr = pOutSample->ConvertToContiguousBuffer(&buf);
             if (FAILED(hr)) break;  // Handle error
 
-            if (isCapturing) callback(buf);
+            if (isCapturing) {
+              hr = callback(buf);
+              if (FAILED(hr)) break;  // Handle error
+            }
           }
 
           SafeRelease(&pOutSample);  // Release pOutSample after using it.

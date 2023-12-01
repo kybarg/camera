@@ -44,7 +44,7 @@ class CaptureDevice {
   std::vector<std::pair<std::wstring, std::wstring>> GetDevicesList();
   HRESULT SelectDevice(int index);
   HRESULT CreateStream();
-  HRESULT StartCapture(std::function<void(IMFMediaBuffer*)> callback);
+  HRESULT StartCapture(std::function<HRESULT(IMFMediaBuffer*)> callback);
   HRESULT StopCapture();
 };
 

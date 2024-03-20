@@ -1,4 +1,3 @@
-#include <emmintrin.h>
 #include <Wmcodecdsp.h>
 #include <assert.h>
 #include <comdef.h>
@@ -14,7 +13,6 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
-
 
 #include "camera.h"
 #include "device.h"
@@ -257,39 +255,31 @@ Napi::Value Camera::StartCapture(const Napi::CallbackInfo& info) {
           HRESULT hr = buffer->Lock(&bufData, nullptr, &bufLength);
 
           if (SUCCEEDED(hr)) {
-            // Ensure buffer length is multiple of 16 for SSE2
-            DWORD paddedLength = (bufLength + 15) & ~15;
+            // Convert RGB to RGBA
+            for (UINT32 y = 0; y < height; y++) {
+              for (UINT32 x = 0; x < width; x += 4) {
+                BYTE* pixel0 = &bufData[((y * width + x) + 0) * 3];
+                BYTE* pixel1 = &bufData[((y * width + x) + 1) * 3];
+                BYTE* pixel2 = &bufData[((y * width + x) + 2) * 3];
+                BYTE* pixel3 = &bufData[((y * width + x) + 3) * 3];
 
-            // Allocate memory for RGBA buffer
-            BYTE* rgbaBuffer = new BYTE[paddedLength * 4 / 3];
-            if (rgbaBuffer) {
-              // Convert RGB to RGBA using SIMD
-              for (DWORD i = 0; i < paddedLength; i += 16) {
-                // Load 16 bytes (4 pixels) of RGB data
-                __m128i rgbData = _mm_load_si128((__m128i*)(bufData + i));
-
-                // Interleave alpha (255) with RGB and store as RGBA
-                __m128i rgbaData = _mm_or_si128(_mm_slli_si128(rgbData, 1), _mm_set1_epi32(0xFF000000));
-
-                // Store RGBA data
-                _mm_store_si128((__m128i*)(rgbaBuffer + i * 4 / 3), rgbaData);
+                // Convert and set alpha component to 255 (fully opaque)
+                pixel0[3] = pixel1[3] = pixel2[3] = pixel3[3] = 0xFF;
               }
-
-              buffer->Unlock();
-
-              Napi::Object result = Napi::Object::New(env);
-              result.Set("width", Napi::Number::New(env, width));
-              result.Set("height", Napi::Number::New(env, height));
-
-              Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::Copy(env, rgbaBuffer, paddedLength * 4 / 3);
-              result.Set("buffer", bufferN);
-
-              // Call the JavaScript callback with the result object
-              jsCallback.Call({env.Null(), result});
-
-              // Release the memory allocated for the RGBA buffer
-              delete[] rgbaBuffer;
             }
+
+            buffer->Unlock();
+
+            Napi::Object result = Napi::Object::New(env);
+            result.Set("width", Napi::Number::New(env, width));
+            result.Set("height", Napi::Number::New(env, height));
+
+            // Create Napi buffer from the modified buffer data
+            Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::New(env, bufData, width * height * 4);
+            result.Set("buffer", bufferN);
+
+            // Call the JavaScript callback with the result object
+            jsCallback.Call({env.Null(), result});
           }
 
           // Release the IMFMediaBuffer

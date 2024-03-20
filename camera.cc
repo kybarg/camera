@@ -1,3 +1,4 @@
+#include <emmintrin.h>
 #include <Wmcodecdsp.h>
 #include <assert.h>
 #include <comdef.h>
@@ -13,6 +14,7 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+
 
 #include "camera.h"
 #include "device.h"
@@ -255,16 +257,39 @@ Napi::Value Camera::StartCapture(const Napi::CallbackInfo& info) {
           HRESULT hr = buffer->Lock(&bufData, nullptr, &bufLength);
 
           if (SUCCEEDED(hr)) {
-            buffer->Unlock();
-            Napi::Object result = Napi::Object::New(env);
-            result.Set("width", Napi::Number::New(env, width));
-            result.Set("height", Napi::Number::New(env, height));
+            // Ensure buffer length is multiple of 16 for SSE2
+            DWORD paddedLength = (bufLength + 15) & ~15;
 
-            Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::Copy(env, bufData, bufLength);
-            result.Set("buffer", bufferN);
+            // Allocate memory for RGBA buffer
+            BYTE* rgbaBuffer = new BYTE[paddedLength * 4 / 3];
+            if (rgbaBuffer) {
+              // Convert RGB to RGBA using SIMD
+              for (DWORD i = 0; i < paddedLength; i += 16) {
+                // Load 16 bytes (4 pixels) of RGB data
+                __m128i rgbData = _mm_load_si128((__m128i*)(bufData + i));
 
-            // Call the JavaScript callback with the result object
-            jsCallback.Call({env.Null(), result});
+                // Interleave alpha (255) with RGB and store as RGBA
+                __m128i rgbaData = _mm_or_si128(_mm_slli_si128(rgbData, 1), _mm_set1_epi32(0xFF000000));
+
+                // Store RGBA data
+                _mm_store_si128((__m128i*)(rgbaBuffer + i * 4 / 3), rgbaData);
+              }
+
+              buffer->Unlock();
+
+              Napi::Object result = Napi::Object::New(env);
+              result.Set("width", Napi::Number::New(env, width));
+              result.Set("height", Napi::Number::New(env, height));
+
+              Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::Copy(env, rgbaBuffer, paddedLength * 4 / 3);
+              result.Set("buffer", bufferN);
+
+              // Call the JavaScript callback with the result object
+              jsCallback.Call({env.Null(), result});
+
+              // Release the memory allocated for the RGBA buffer
+              delete[] rgbaBuffer;
+            }
           }
 
           // Release the IMFMediaBuffer

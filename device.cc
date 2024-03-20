@@ -144,14 +144,7 @@ HRESULT CaptureDevice::CreateStream() {
   hr = pSrcOutMediaType->CopyAllItems(pMFTOutputMediaType);
   if (FAILED(hr)) goto CleanUp;
 
-  hr = pMFTOutputMediaType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-  if (FAILED(hr)) goto CleanUp;
-
-  // Now adjust the subtype to reflect RGBA order
-  GUID rgb32Subtype = MFVideoFormat_RGB32;
-  rgb32Subtype.Data1 = MAKEFOURCC('R', 'G', 'B', 'A');
-
-  hr = pMFTOutputMediaType->SetGUID(MF_MT_SUBTYPE, rgb32Subtype);
+  hr = pMFTOutputMediaType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB24);
   if (FAILED(hr)) goto CleanUp;
 
   hr = pMFTOutputMediaType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);

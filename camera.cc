@@ -256,15 +256,16 @@ Napi::Value Camera::StartCapture(const Napi::CallbackInfo& info) {
 
           if (SUCCEEDED(hr)) {
             // Convert RGB to RGBA
+            DWORD* rgbaBuffer = new DWORD[width * height];
             for (UINT32 y = 0; y < height; y++) {
-              for (UINT32 x = 0; x < width; x += 4) {
-                BYTE* pixel0 = &bufData[((y * width + x) + 0) * 3];
-                BYTE* pixel1 = &bufData[((y * width + x) + 1) * 3];
-                BYTE* pixel2 = &bufData[((y * width + x) + 2) * 3];
-                BYTE* pixel3 = &bufData[((y * width + x) + 3) * 3];
-
-                // Convert and set alpha component to 255 (fully opaque)
-                pixel0[3] = pixel1[3] = pixel2[3] = pixel3[3] = 0xFF;
+              for (UINT32 x = 0; x < width; x++) {
+                // Assuming 3 bytes per pixel for RGB
+                BYTE r = bufData[(y * width + x) * 3];
+                BYTE g = bufData[(y * width + x) * 3 + 1];
+                BYTE b = bufData[(y * width + x) * 3 + 2];
+                // Set alpha to 255 (fully opaque)
+                DWORD rgbaPixel = (0xFF << 24) | (r << 16) | (g << 8) | b;
+                rgbaBuffer[y * width + x] = rgbaPixel;
               }
             }
 
@@ -274,12 +275,15 @@ Napi::Value Camera::StartCapture(const Napi::CallbackInfo& info) {
             result.Set("width", Napi::Number::New(env, width));
             result.Set("height", Napi::Number::New(env, height));
 
-            // Create Napi buffer from the modified buffer data
-            Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::New(env, bufData, width * height * 4);
+            // Create Napi buffer from RGBA data
+            Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::Copy(env, reinterpret_cast<BYTE*>(rgbaBuffer), width * height * sizeof(DWORD));
             result.Set("buffer", bufferN);
 
             // Call the JavaScript callback with the result object
             jsCallback.Call({env.Null(), result});
+
+            // Release resources
+            delete[] rgbaBuffer;
           }
 
           // Release the IMFMediaBuffer

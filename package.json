@@ -1,12 +1,57 @@
 {
   "name": "@kybarg/camera",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Node.js Addons to work with web cameras",
+  "license": "MIT",
+  "author": {
+    "name": "Ruslan Kyba",
+    "email": "kybargr+camera@gmail.com"
+  },
+  "homepage": "https://github.com/kybarg/camera#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kybarg/camera.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kybarg/camera/issues"
+  },
   "main": "addon.js",
-  "private": false,
+  "scripts": {
+    "lint": "eslint lib example.js",
+    "prettier": "npx prettier --write \"**/*.{ts,tsx,js,md,mdx,css,yaml}\"",
+    "test": "jest --coverage",
+    "test:watch": "jest --watch",
+    "docs": "node scripts/docs.js"
+  },
   "dependencies": {
     "bindings": "^1.5.0",
-    "node-addon-api": "^7.0.0",
-    "node-gyp": "^10.0.0"
+    "node-addon-api": "^7.1.1",
+    "node-gyp": "^10.3.1"
+  },
+  "keywords": [
+    "bv100",
+    "bv20",
+    "bv50",
+    "encrypted-smiley-secure-protocol",
+    "encrypted",
+    "essp",
+    "itl",
+    "nv10usb",
+    "nv11",
+    "nv200",
+    "nv22",
+    "nv9",
+    "nv9usb",
+    "protocol",
+    "secure",
+    "smart-hopper",
+    "smart-payout",
+    "smiley-secure-protocol",
+    "smiley",
+    "ssp"
+  ],
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
   }
 }

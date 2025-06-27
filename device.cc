@@ -241,33 +241,35 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
 
             if (isCapturing) {
               BYTE* pData = nullptr;
-              DWORD maxLength = 0;
-              DWORD currentLength = 0;
+              DWORD cbMaxLength = 0;
+              DWORD cbCurrentLength = 0;
 
-              // Lock the buffer to get pointer to raw data
-              hr = buf->Lock(&pData, &maxLength, &currentLength);
+              hr = buf->Lock(&pData, &cbMaxLength, &cbCurrentLength);
+              if (SUCCEEDED(hr)) {
+                // Assumes 4 bytes per pixel (BGRA)
+                const DWORD pixelCount = cbCurrentLength / 4;
+
+                for (DWORD i = 0; i < pixelCount; ++i) {
+                  BYTE* pixel = pData + (i * 4);
+
+                  // Swap R (pixel[2]) and B (pixel[0])
+                  std::swap(pixel[0], pixel[2]);
+                }
+
+                hr = buf->Unlock();
+
+                if (FAILED(hr)) {
+                  SafeRelease(&buf);
+                  break;
+                }
+              }
+
+              hr = callback(buf);
+
               if (FAILED(hr)) {
                 SafeRelease(&buf);
                 break;
               }
-
-              // In-place swizzle BGRA -> RGBA for correct colors
-              for (DWORD i = 0; i + 3 < currentLength; i += 4) {
-                std::swap(pData[i], pData[i + 2]);  // Swap B and R channels
-              }
-
-              // Unlock before calling callback (some APIs require unlocked buffer)
-              hr = buf->Unlock();
-              if (FAILED(hr)) {
-                buf->Release();
-                break;
-              }
-
-              // Call your Node.js callback with the IMFMediaBuffer*
-              buf->AddRef();
-              hr = callback(buf);
-
-              if (FAILED(hr)) break;
             } else {
               SafeRelease(&buf);
             }

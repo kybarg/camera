@@ -230,18 +230,46 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
 
           if (mftResult == S_OK) {
             hr = outputDataBuffer.pSample->SetSampleTime(llTimeStamp);
-            if (FAILED(hr)) break;  // Handle error
+            if (FAILED(hr)) break;
 
             hr = outputDataBuffer.pSample->SetSampleDuration(llDuration);
-            if (FAILED(hr)) break;  // Handle error
+            if (FAILED(hr)) break;
 
-            IMFMediaBuffer* buf = NULL;
+            IMFMediaBuffer* buf = nullptr;
             hr = pOutSample->ConvertToContiguousBuffer(&buf);
-            if (FAILED(hr)) break;  // Handle error
+            if (FAILED(hr)) break;
 
             if (isCapturing) {
+              BYTE* pData = nullptr;
+              DWORD maxLength = 0;
+              DWORD currentLength = 0;
+
+              // Lock the buffer to get pointer to raw data
+              hr = buf->Lock(&pData, &maxLength, &currentLength);
+              if (FAILED(hr)) {
+                SafeRelease(&buf);
+                break;
+              }
+
+              // In-place swizzle BGRA -> RGBA for correct colors
+              for (DWORD i = 0; i + 3 < currentLength; i += 4) {
+                std::swap(pData[i], pData[i + 2]);  // Swap B and R channels
+              }
+
+              // Unlock before calling callback (some APIs require unlocked buffer)
+              hr = buf->Unlock();
+              if (FAILED(hr)) {
+                buf->Release();
+                break;
+              }
+
+              // Call your Node.js callback with the IMFMediaBuffer*
+              buf->AddRef();
               hr = callback(buf);
-              if (FAILED(hr)) break;  // Handle error
+
+              if (FAILED(hr)) break;
+            } else {
+              SafeRelease(&buf);
             }
           }
 

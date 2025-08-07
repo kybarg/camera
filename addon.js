@@ -28,6 +28,11 @@ class Camera extends addon.Camera {
       });
     };
     this.stopCapture = this.stopCaptureN;
+
+    // Expose new format methods
+    this.getSupportedFormats = this.getSupportedFormats.bind(this);
+    this.setDesiredFormat = this.setDesiredFormat.bind(this);
+    this.getDimensions = this.getDimensions.bind(this);
   }
 }
 

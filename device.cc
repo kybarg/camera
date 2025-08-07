@@ -16,6 +16,9 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+#include <algorithm>
+#include <cfloat>
+#include <tuple>
 
 void CaptureDevice::Clear() {
   for (UINT32 i = 0; i < m_cDevices; i++) {
@@ -324,6 +327,120 @@ HRESULT CaptureDevice::StopCapture() {
   }
 
   isCapturing = false;
+
+  return hr;
+}
+
+std::vector<std::tuple<UINT32, UINT32, UINT32>> CaptureDevice::GetSupportedFormats() {
+  std::vector<std::tuple<UINT32, UINT32, UINT32>> formats;
+
+  if (!m_pReader) {
+    return formats; // Return empty if no reader
+  }
+
+  DWORD mediaTypeIndex = 0;
+  IMFMediaType* pMediaType = NULL;
+
+  while (SUCCEEDED(m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, mediaTypeIndex, &pMediaType))) {
+    UINT32 width, height;
+    if (SUCCEEDED(MFGetAttributeSize(pMediaType, MF_MT_FRAME_SIZE, &width, &height))) {
+      UINT32 numerator, denominator;
+      UINT32 frameRate = 30; // Default fallback
+      if (SUCCEEDED(MFGetAttributeRatio(pMediaType, MF_MT_FRAME_RATE, &numerator, &denominator))) {
+        frameRate = (denominator > 0) ? (numerator / denominator) : 30;
+      }
+
+      // Check if this format combination is already in the list
+      bool found = false;
+      for (const auto& format : formats) {
+        if (std::get<0>(format) == width && std::get<1>(format) == height && std::get<2>(format) == frameRate) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        formats.emplace_back(width, height, frameRate);
+      }
+    }
+    SafeRelease(&pMediaType);
+    mediaTypeIndex++;
+  }
+
+  // Sort formats by resolution (descending) then by frame rate (descending)
+  std::sort(formats.begin(), formats.end(),
+    [](const std::tuple<UINT32, UINT32, UINT32>& a, const std::tuple<UINT32, UINT32, UINT32>& b) {
+      UINT32 pixelsA = std::get<0>(a) * std::get<1>(a);
+      UINT32 pixelsB = std::get<0>(b) * std::get<1>(b);
+      if (pixelsA != pixelsB) {
+        return pixelsA > pixelsB; // Higher resolution first
+      }
+      return std::get<2>(a) > std::get<2>(b); // Higher frame rate first for same resolution
+    });
+
+  return formats;
+}
+
+HRESULT CaptureDevice::SetDesiredFormat(UINT32 desiredWidth, UINT32 desiredHeight, UINT32 desiredFrameRate) {
+  if (!m_pReader) {
+    return E_POINTER;
+  }
+
+  HRESULT hr = S_OK;
+  IMFMediaType* pBestMediaType = NULL;
+  DWORD bestMediaTypeIndex = 0;
+
+  // Find the closest matching format
+  DWORD mediaTypeIndex = 0;
+  IMFMediaType* pMediaType = NULL;
+
+  UINT32 bestWidthDiff = UINT32_MAX;
+  UINT32 bestHeightDiff = UINT32_MAX;
+  UINT32 bestFrameRateDiff = UINT32_MAX;
+  double bestScore = DBL_MAX;
+
+  while (SUCCEEDED(m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, mediaTypeIndex, &pMediaType))) {
+    UINT32 typeWidth, typeHeight;
+    if (SUCCEEDED(MFGetAttributeSize(pMediaType, MF_MT_FRAME_SIZE, &typeWidth, &typeHeight))) {
+      UINT32 numerator, denominator;
+      UINT32 frameRate = 30; // Default fallback
+      if (SUCCEEDED(MFGetAttributeRatio(pMediaType, MF_MT_FRAME_RATE, &numerator, &denominator))) {
+        frameRate = (denominator > 0) ? (numerator / denominator) : 30;
+      }
+
+      // Calculate similarity score (lower is better)
+      UINT32 widthDiff = (typeWidth > desiredWidth) ? (typeWidth - desiredWidth) : (desiredWidth - typeWidth);
+      UINT32 heightDiff = (typeHeight > desiredHeight) ? (typeHeight - desiredHeight) : (desiredHeight - typeHeight);
+      UINT32 frameRateDiff = (frameRate > desiredFrameRate) ? (frameRate - desiredFrameRate) : (desiredFrameRate - frameRate);
+
+      // Weighted score: resolution is more important than framerate
+      double score = (widthDiff * 2.0) + (heightDiff * 2.0) + (frameRateDiff * 1.0);
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestWidthDiff = widthDiff;
+        bestHeightDiff = heightDiff;
+        bestFrameRateDiff = frameRateDiff;
+        bestMediaTypeIndex = mediaTypeIndex;
+        SafeRelease(&pBestMediaType);
+        pBestMediaType = pMediaType;
+        pBestMediaType->AddRef();
+      }
+    }
+    SafeRelease(&pMediaType);
+    mediaTypeIndex++;
+  }
+
+  if (pBestMediaType) {
+    // Set the best matching media type
+    hr = m_pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pBestMediaType);
+    if (SUCCEEDED(hr)) {
+      // Update our stored dimensions
+      MFGetAttributeSize(pBestMediaType, MF_MT_FRAME_SIZE, &width, &height);
+    }
+    SafeRelease(&pBestMediaType);
+  } else {
+    hr = E_FAIL;
+  }
 
   return hr;
 }

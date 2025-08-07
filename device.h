@@ -62,6 +62,10 @@ class CaptureDevice {
   HRESULT CreateStream();
   HRESULT StartCapture(std::function<HRESULT(IMFMediaBuffer*)> callback);
   HRESULT StopCapture();
+
+  // New methods for resolution and framerate management
+  std::vector<std::tuple<UINT32, UINT32, UINT32>> GetSupportedFormats();
+  HRESULT SetDesiredFormat(UINT32 desiredWidth, UINT32 desiredHeight, UINT32 desiredFrameRate);
 };
 
 #endif  // CaptureDevice_H

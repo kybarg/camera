@@ -25,11 +25,13 @@ struct ResultData {
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
   Napi::Function func = DefineClass(env, "Camera", {
-    InstanceMethod("enumerateDevicesN", &Camera::EnumerateDevices), 
-    InstanceMethod("selectDeviceN", &Camera::SelectDevice), 
-    InstanceMethod("startCaptureN", &Camera::StartCapture), 
+    InstanceMethod("enumerateDevicesN", &Camera::EnumerateDevices),
+    InstanceMethod("selectDeviceN", &Camera::SelectDevice),
+    InstanceMethod("startCaptureN", &Camera::StartCapture),
     InstanceMethod("stopCaptureN", &Camera::StopCapture),
-    InstanceMethod("getDimensions", &Camera::GetDimensions)
+    InstanceMethod("getDimensions", &Camera::GetDimensions),
+    InstanceMethod("getSupportedFormats", &Camera::GetSupportedFormats),
+    InstanceMethod("setDesiredFormat", &Camera::SetDesiredFormat)
   });
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
@@ -333,10 +335,55 @@ Napi::Value Camera::StopCapture(const Napi::CallbackInfo& info) {
 
 Napi::Value Camera::GetDimensions(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  
+
   Napi::Object dimensions = Napi::Object::New(env);
   dimensions.Set("width", Napi::Number::New(env, device.width));
   dimensions.Set("height", Napi::Number::New(env, device.height));
-  
+
   return dimensions;
+}
+
+Napi::Value Camera::GetSupportedFormats(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  auto formats = device.GetSupportedFormats();
+  Napi::Array result = Napi::Array::New(env, formats.size());
+
+  for (size_t i = 0; i < formats.size(); i++) {
+    Napi::Object format = Napi::Object::New(env);
+    format.Set("width", Napi::Number::New(env, std::get<0>(formats[i])));
+    format.Set("height", Napi::Number::New(env, std::get<1>(formats[i])));
+    format.Set("frameRate", Napi::Number::New(env, std::get<2>(formats[i])));
+    result.Set(i, format);
+  }
+
+  return result;
+}
+
+Napi::Value Camera::SetDesiredFormat(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  if (info.Length() < 3 || !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsNumber()) {
+    Napi::TypeError::New(env, "Expected width, height, and frameRate as numbers").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  UINT32 width = info[0].As<Napi::Number>().Uint32Value();
+  UINT32 height = info[1].As<Napi::Number>().Uint32Value();
+  UINT32 frameRate = info[2].As<Napi::Number>().Uint32Value();
+
+  HRESULT hr = device.SetDesiredFormat(width, height, frameRate);
+
+  if (SUCCEEDED(hr)) {
+    Napi::Object result = Napi::Object::New(env);
+    result.Set("success", Napi::Boolean::New(env, true));
+    result.Set("actualWidth", Napi::Number::New(env, device.width));
+    result.Set("actualHeight", Napi::Number::New(env, device.height));
+    return result;
+  } else {
+    Napi::Object result = Napi::Object::New(env);
+    result.Set("success", Napi::Boolean::New(env, false));
+    result.Set("error", Napi::String::New(env, "Failed to set desired format"));
+    return result;
+  }
 }

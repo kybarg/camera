@@ -26,6 +26,8 @@ class Camera : public Napi::ObjectWrap<Camera> {
   Napi::Value StartCapture(const Napi::CallbackInfo& info);
   Napi::Value StopCapture(const Napi::CallbackInfo& info);
   Napi::Value GetDimensions(const Napi::CallbackInfo& info);
+  Napi::Value GetSupportedFormats(const Napi::CallbackInfo& info);
+  Napi::Value SetDesiredFormat(const Napi::CallbackInfo& info);
 };
 
 #endif

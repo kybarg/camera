@@ -38,6 +38,36 @@ npm install
 
 ## Quick Start
 
+### Installation and Build
+
+```bash
+npm install
+npm run build
+```
+
+### Running Examples
+
+```bash
+# Basic camera capture
+npm run example
+
+# Format management
+npm run example:format
+
+# Device status demonstration
+npm run example:devices
+```
+
+### Running Tests
+
+```bash
+# Run main test
+npm test
+
+# Run all tests
+npm run test:all
+```
+
 ```javascript
 const Camera = require('./addon.js');
 
@@ -67,13 +97,16 @@ Run any example from the `examples/` directory:
 
 ```bash
 # Basic camera capture
-node examples/example.js
+npm run example
+# or: node examples/example.js
 
 # Format management
-node examples/format-example.js
+npm run example:format
+# or: node examples/format-example.js
 
 # Device status demonstration
-node examples/devices-status-example.js
+npm run example:devices
+# or: node examples/devices-status-example.js
 ```
 
 ## Tests
@@ -82,13 +115,17 @@ Run tests from the `tests/` directory:
 
 ```bash
 # Test device claiming
-node tests/test-claim-device.js
+npm test
+# or: node tests/test-claim-device.js
 
 # Test camera availability
 node tests/camera-claim-test.js
 
 # Test symbolic link persistence
 node tests/test-symlink-persistence.js
+
+# Run all tests
+npm run test:all
 ```
 
 ## API Reference

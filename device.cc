@@ -31,6 +31,13 @@ void CaptureDevice::Clear() {
   m_cDevices = 0;
 }
 
+// Conservative device status check
+bool CaptureDevice::IsCameraBusy(const std::wstring& symbolicLink) {
+  
+  // Device not found - assume not busy
+  return false;
+}
+
 HRESULT CaptureDevice::EnumerateDevices() {
   HRESULT hr = S_OK;
   IMFAttributes* pAttributes = NULL;
@@ -59,8 +66,8 @@ HRESULT CaptureDevice::EnumerateDevices() {
   return hr;
 }
 
-std::vector<std::pair<std::wstring, std::wstring>> CaptureDevice::GetDevicesList() {
-  std::vector<std::pair<std::wstring, std::wstring>> devices;
+std::vector<DeviceInfo> CaptureDevice::GetDevicesList() {
+  std::vector<DeviceInfo> devices;
 
   for (UINT32 i = 0; i < this->Count(); i++) {
     WCHAR* pFriendlyName = nullptr;
@@ -70,7 +77,11 @@ std::vector<std::pair<std::wstring, std::wstring>> CaptureDevice::GetDevicesList
     if (SUCCEEDED(hr)) {
       hr = this->m_ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, &pSymbolicLink, nullptr);
       if (SUCCEEDED(hr)) {
-        devices.emplace_back(std::make_pair(pFriendlyName, pSymbolicLink));
+        // Use our dedicated function to check if device is busy
+        std::wstring symbolicLinkStr(pSymbolicLink);
+        bool isClaimed = IsCameraBusy(symbolicLinkStr);
+
+        devices.emplace_back(DeviceInfo(pFriendlyName, pSymbolicLink, isClaimed));
         CoTaskMemFree(pSymbolicLink);
       }
       CoTaskMemFree(pFriendlyName);

@@ -25,7 +25,7 @@ struct ResultData {
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
   Napi::Function func = DefineClass(env, "Camera", {
-    InstanceMethod("enumerateDevicesN", &Camera::EnumerateDevices),
+    InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync),
     InstanceMethod("selectDeviceN", &Camera::SelectDevice),
     InstanceMethod("startCaptureN", &Camera::StartCapture),
     InstanceMethod("stopCaptureN", &Camera::StopCapture),
@@ -49,81 +49,67 @@ Camera::Camera(const Napi::CallbackInfo& info)
 
 Camera::~Camera() {}
 
-Napi::Value Camera::EnumerateDevices(const Napi::CallbackInfo& info) {
+Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-
-  if (info.Length() < 1) {
-    Napi::Error::New(env, "Expected callback function").ThrowAsJavaScriptException();
-    return env.Null();
-  } else if (!info[0].IsFunction()) {
-    Napi::TypeError::New(env, "Callback should be a function").ThrowAsJavaScriptException();
-    return env.Null();
-  }
-
-  Napi::Function jsCallback = info[0].As<Napi::Function>();
-
-  tsfn = Napi::ThreadSafeFunction::New(
-      env,
-      jsCallback,
-      "EnumerateDevices",
-      0,
-      1,
-      [this](Napi::Env) {
-        if (nativeThread.joinable()) {
-          nativeThread.join();
-        }
-      });
-
-  nativeThread = std::thread([this]() {
+  
+  // Create a promise
+  auto deferred = Napi::Promise::Deferred::New(env);
+  
+  // Create thread-safe function for the promise resolution
+  auto tsfnPromise = Napi::ThreadSafeFunction::New(
+    env,
+    Napi::Function(),
+    "EnumerateDevicesAsync",
+    0,
+    1
+  );
+  
+  // Start async operation
+  std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
     try {
       HRESULT hr = device.EnumerateDevices();
-      // hr = E_POINTER;
-
+      
       if (SUCCEEDED(hr)) {
         auto deviceData = device.GetDevicesList();
-
-        auto callback = [deviceData = std::move(deviceData)](Napi::Env env, Napi::Function jsCallback) {
+        
+        auto callback = [deferred = std::move(deferred), deviceData = std::move(deviceData)](Napi::Env env, Napi::Function) mutable {
           Napi::Array devices = Napi::Array::New(env);
-
+          
           for (size_t i = 0; i < deviceData.size(); i++) {
             Napi::Object deviceInfo = Napi::Object::New(env);
-
-            deviceInfo.Set("friendlyName", Napi::String::New(env, reinterpret_cast<const char16_t*>(deviceData[i].first.c_str())));
-            deviceInfo.Set("symbolicLink", Napi::String::New(env, reinterpret_cast<const char16_t*>(deviceData[i].second.c_str())));
+            
+            deviceInfo.Set("friendlyName", Napi::String::New(env, reinterpret_cast<const char16_t*>(deviceData[i].friendlyName.c_str())));
+            deviceInfo.Set("symbolicLink", Napi::String::New(env, reinterpret_cast<const char16_t*>(deviceData[i].symbolicLink.c_str())));
+            deviceInfo.Set("isClaimed", Napi::Boolean::New(env, deviceData[i].isClaimed));
             devices.Set(i, deviceInfo);
           }
-
-          jsCallback.Call({env.Null(), devices});
+          
+          deferred.Resolve(devices);
         };
-
-        tsfn.BlockingCall(callback);
-        deviceData.clear();
+        
+        tsfnPromise.BlockingCall(callback);
       } else {
-        _com_error err(hr);
-        LPCTSTR errMsg = err.ErrorMessage();
-        std::string message = errMsg;
-
-        auto callback = [message](Napi::Env env, Napi::Function jsCallback) {
-          jsCallback.Call({Napi::Error::New(env, message).Value()});
+        auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
+          _com_error err(hr);
+          LPCTSTR errMsg = err.ErrorMessage();
+          std::string message = errMsg;
+          deferred.Reject(Napi::Error::New(env, message).Value());
         };
-
-        tsfn.BlockingCall(callback);
+        
+        tsfnPromise.BlockingCall(callback);
       }
     } catch (const std::exception& e) {
-      std::string message = e.what();
-
-      auto callback = [message](Napi::Env env, Napi::Function jsCallback) {
-        jsCallback.Call({Napi::Error::New(env, message).Value()});
+      auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
+        deferred.Reject(Napi::Error::New(env, message).Value());
       };
-
-      tsfn.BlockingCall(callback);
+      
+      tsfnPromise.BlockingCall(callback);
     }
-
-    tsfn.Release();
-  });
-  nativeThread.detach();
-
-  return env.Undefined();
+    
+    tsfnPromise.Release();
+  }).detach();
+  
+  return deferred.Promise();
 }
 
 Napi::Value Camera::SelectDevice(const Napi::CallbackInfo& info) {

@@ -4,7 +4,7 @@ const util = require("util");
 class Camera extends addon.Camera {
   constructor() {
     super(); // Call the parent constructor
-    this.enumerateDevices = util.promisify(this.enumerateDevicesN.bind(this));
+    this.enumerateDevices = this.enumerateDevicesAsync; // Use the new async method
     this.selectDevice = util.promisify(this.selectDeviceN.bind(this));
 
     this.tmp = null;

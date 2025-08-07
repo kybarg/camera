@@ -21,7 +21,7 @@ class Camera : public Napi::ObjectWrap<Camera> {
   Napi::ThreadSafeFunction tsfnCapturing;
   std::thread nativeThread;
 
-  Napi::Value EnumerateDevices(const Napi::CallbackInfo& info);
+  Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);
   Napi::Value SelectDevice(const Napi::CallbackInfo& info);
   Napi::Value StartCapture(const Napi::CallbackInfo& info);
   Napi::Value StopCapture(const Napi::CallbackInfo& info);

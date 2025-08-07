@@ -17,6 +17,16 @@
 #ifndef CaptureDevice_H
 #define CaptureDevice_H
 
+// Structure to hold device information
+struct DeviceInfo {
+  std::wstring friendlyName;
+  std::wstring symbolicLink;
+  bool isClaimed;
+
+  DeviceInfo(const std::wstring& name, const std::wstring& link, bool claimed)
+    : friendlyName(name), symbolicLink(link), isClaimed(claimed) {}
+};
+
 template <class T>
 void SafeRelease(T** ppT) {
   if (*ppT) {
@@ -57,7 +67,8 @@ class CaptureDevice {
 
   void Clear();
   HRESULT EnumerateDevices();
-  std::vector<std::pair<std::wstring, std::wstring>> GetDevicesList();
+  bool IsCameraBusy(const std::wstring& symbolicLink);
+  std::vector<DeviceInfo> GetDevicesList();
   HRESULT SelectDevice(int index);
   HRESULT CreateStream();
   HRESULT StartCapture(std::function<HRESULT(IMFMediaBuffer*)> callback);

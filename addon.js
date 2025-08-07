@@ -4,14 +4,14 @@ const EventEmitter = require("events");
 class Camera extends EventEmitter {
   constructor() {
     super(); // Call EventEmitter constructor
-    
+
     // Create native camera instance
     this._nativeCamera = new addon.Camera();
-    
+
     // Bind async methods from native camera
     this.enumerateDevices = this._nativeCamera.enumerateDevicesAsync.bind(this._nativeCamera);
     this.claimDevice = this._nativeCamera.claimDeviceAsync.bind(this._nativeCamera);
-    
+
     // Bind other native methods
     this.getSupportedFormats = this._nativeCamera.getSupportedFormats.bind(this._nativeCamera);
     this.setDesiredFormat = this._nativeCamera.setDesiredFormat.bind(this._nativeCamera);
@@ -40,7 +40,7 @@ class Camera extends EventEmitter {
     }
 
     this._isCapturing = true;
-    
+
     try {
       // Pass the frame event emitter to the native method
       const result = await this._nativeCamera.startCaptureAsync(this._frameEventEmitter);

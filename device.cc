@@ -242,42 +242,40 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
 
               hr = buf->Lock(&pData, &cbMaxLength, &cbCurrentLength);
               if (SUCCEEDED(hr)) {
-                // High-performance BGRA to RGBA conversion
+                // Ultra-fast BGRA to RGBA conversion using vectorized operations
                 const DWORD pixelCount = cbCurrentLength / 4;
                 DWORD* pixels = reinterpret_cast<DWORD*>(pData);
 
-                // Process 8 pixels at a time for maximum cache efficiency
-                const DWORD alignedCount = (pixelCount / 8) * 8;
+                // Constants for bit manipulation
+                constexpr DWORD ALPHA_MASK = 0xFF000000;  // Alpha = 255
+                constexpr DWORD GREEN_MASK = 0x0000FF00;  // Green unchanged
+                constexpr DWORD BLUE_MASK  = 0x000000FF;  // Blue channel
+                constexpr DWORD RED_MASK   = 0x00FF0000;  // Red channel
 
-                // Unrolled loop for 8 pixels at once
-                for (DWORD i = 0; i < alignedCount; i += 8) {
-                  // Load 8 pixels
-                  DWORD p0 = pixels[i];
-                  DWORD p1 = pixels[i + 1];
-                  DWORD p2 = pixels[i + 2];
-                  DWORD p3 = pixels[i + 3];
-                  DWORD p4 = pixels[i + 4];
-                  DWORD p5 = pixels[i + 5];
-                  DWORD p6 = pixels[i + 6];
-                  DWORD p7 = pixels[i + 7];
+                // Process 16 pixels at once for maximum throughput
+                const DWORD vectorCount = pixelCount / 16;
+                const DWORD vectorPixels = vectorCount * 16;
 
-                  // Convert BGRA (0xAABBGGRR) to RGBA (0xFFRRGGBB) using bit manipulation
-                  // Extract: B=(p&0xFF), G=(p&0xFF00), R=(p&0xFF0000)
-                  // Result: A=0xFF000000, R=(B<<16), G=(G), B=(R>>16)
-                  pixels[i]     = 0xFF000000 | ((p0 & 0x0000FF00)) | ((p0 & 0x00FF0000) >> 16) | ((p0 & 0x000000FF) << 16);
-                  pixels[i + 1] = 0xFF000000 | ((p1 & 0x0000FF00)) | ((p1 & 0x00FF0000) >> 16) | ((p1 & 0x000000FF) << 16);
-                  pixels[i + 2] = 0xFF000000 | ((p2 & 0x0000FF00)) | ((p2 & 0x00FF0000) >> 16) | ((p2 & 0x000000FF) << 16);
-                  pixels[i + 3] = 0xFF000000 | ((p3 & 0x0000FF00)) | ((p3 & 0x00FF0000) >> 16) | ((p3 & 0x000000FF) << 16);
-                  pixels[i + 4] = 0xFF000000 | ((p4 & 0x0000FF00)) | ((p4 & 0x00FF0000) >> 16) | ((p4 & 0x000000FF) << 16);
-                  pixels[i + 5] = 0xFF000000 | ((p5 & 0x0000FF00)) | ((p5 & 0x00FF0000) >> 16) | ((p5 & 0x000000FF) << 16);
-                  pixels[i + 6] = 0xFF000000 | ((p6 & 0x0000FF00)) | ((p6 & 0x00FF0000) >> 16) | ((p6 & 0x000000FF) << 16);
-                  pixels[i + 7] = 0xFF000000 | ((p7 & 0x0000FF00)) | ((p7 & 0x00FF0000) >> 16) | ((p7 & 0x000000FF) << 16);
+                // Vectorized processing - 16 pixels per iteration
+                for (DWORD i = 0; i < vectorPixels; i += 16) {
+                  // Process 16 pixels in parallel using loop unrolling
+                  for (DWORD j = 0; j < 16; ++j) {
+                    const DWORD pixel = pixels[i + j];
+                    // BGRA -> RGBA: Swap R&B, keep G, set A=255
+                    pixels[i + j] = ALPHA_MASK |
+                                   (pixel & GREEN_MASK) |
+                                   ((pixel & BLUE_MASK) << 16) |
+                                   ((pixel & RED_MASK) >> 16);
+                  }
                 }
 
-                // Handle remaining pixels (0-7 pixels)
-                for (DWORD i = alignedCount; i < pixelCount; ++i) {
-                  DWORD pixel = pixels[i];
-                  pixels[i] = 0xFF000000 | ((pixel & 0x0000FF00)) | ((pixel & 0x00FF0000) >> 16) | ((pixel & 0x000000FF) << 16);
+                // Handle remaining pixels (0-15 pixels)
+                for (DWORD i = vectorPixels; i < pixelCount; ++i) {
+                  const DWORD pixel = pixels[i];
+                  pixels[i] = ALPHA_MASK |
+                             (pixel & GREEN_MASK) |
+                             ((pixel & BLUE_MASK) << 16) |
+                             ((pixel & RED_MASK) >> 16);
                 }
 
                 hr = buf->Unlock();

@@ -31,6 +31,7 @@ Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
     InstanceMethod("startCaptureN", &Camera::StartCapture),
     InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync),
     InstanceMethod("stopCaptureN", &Camera::StopCapture),
+    InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync),
     InstanceMethod("getDimensions", &Camera::GetDimensions),
     InstanceMethod("getSupportedFormats", &Camera::GetSupportedFormats),
     InstanceMethod("setDesiredFormat", &Camera::SetDesiredFormat)
@@ -379,6 +380,55 @@ Napi::Value Camera::StopCapture(const Napi::CallbackInfo& info) {
   deferred.Resolve(Napi::String::New(env, "Promise resolved"));
 
   // Returning the Promise
+  return deferred.Promise();
+}
+
+Napi::Value Camera::StopCaptureAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  // Create a promise
+  auto deferred = Napi::Promise::Deferred::New(env);
+
+  // Create thread-safe function for the promise resolution
+  auto tsfnPromise = Napi::ThreadSafeFunction::New(
+    env,
+    Napi::Function(),
+    "StopCaptureAsync",
+    0,
+    1
+  );
+
+  // Start async operation
+  std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
+    try {
+      HRESULT hr = device.StopCapture();
+
+      auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
+        if (SUCCEEDED(hr)) {
+          Napi::Object result = Napi::Object::New(env);
+          result.Set("success", Napi::Boolean::New(env, true));
+          result.Set("message", Napi::String::New(env, "Capture stopped successfully"));
+          deferred.Resolve(result);
+        } else {
+          _com_error err(hr);
+          LPCTSTR errMsg = err.ErrorMessage();
+          std::string message = errMsg;
+          deferred.Reject(Napi::Error::New(env, message).Value());
+        }
+      };
+
+      tsfnPromise.BlockingCall(callback);
+    } catch (const std::exception& e) {
+      auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
+        deferred.Reject(Napi::Error::New(env, message).Value());
+      };
+
+      tsfnPromise.BlockingCall(callback);
+    }
+
+    tsfnPromise.Release();
+  }).detach();
+
   return deferred.Promise();
 }
 

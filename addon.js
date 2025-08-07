@@ -16,7 +16,6 @@ class Camera extends EventEmitter {
     this.getSupportedFormats = this._nativeCamera.getSupportedFormats.bind(this._nativeCamera);
     this.setDesiredFormat = this._nativeCamera.setDesiredFormat.bind(this._nativeCamera);
     this.getDimensions = this._nativeCamera.getDimensions.bind(this._nativeCamera);
-    this.stopCapture = this._nativeCamera.stopCaptureN.bind(this._nativeCamera);
 
     this.tmp = null;
     this._isCapturing = false;
@@ -52,9 +51,14 @@ class Camera extends EventEmitter {
   }
 
   // Override stopCapture to update internal state
-  stopCapture() {
+  async stopCapture() {
     this._isCapturing = false;
-    return this._nativeCamera.stopCaptureN();
+    try {
+      const result = await this._nativeCamera.stopCaptureAsync();
+      return result;
+    } catch (error) {
+      throw error;
+    }
   }
 
   // Helper method to check if capturing

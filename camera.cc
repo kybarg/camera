@@ -29,8 +29,7 @@ Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
     InstanceMethod("selectDeviceN", &Camera::SelectDevice), 
     InstanceMethod("startCaptureN", &Camera::StartCapture), 
     InstanceMethod("stopCaptureN", &Camera::StopCapture),
-    InstanceAccessor("width", &Camera::GetWidth, nullptr),
-    InstanceAccessor("height", &Camera::GetHeight, nullptr)
+    InstanceMethod("getDimensions", &Camera::GetDimensions)
   });
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
@@ -332,12 +331,12 @@ Napi::Value Camera::StopCapture(const Napi::CallbackInfo& info) {
   return deferred.Promise();
 }
 
-Napi::Value Camera::GetWidth(const Napi::CallbackInfo& info) {
+Napi::Value Camera::GetDimensions(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  return Napi::Number::New(env, device.width);
-}
-
-Napi::Value Camera::GetHeight(const Napi::CallbackInfo& info) {
-  Napi::Env env = info.Env();
-  return Napi::Number::New(env, device.height);
+  
+  Napi::Object dimensions = Napi::Object::New(env);
+  dimensions.Set("width", Napi::Number::New(env, device.width));
+  dimensions.Set("height", Napi::Number::New(env, device.height));
+  
+  return dimensions;
 }

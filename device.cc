@@ -242,28 +242,42 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
 
               hr = buf->Lock(&pData, &cbMaxLength, &cbCurrentLength);
               if (SUCCEEDED(hr)) {
-                // MFVideoFormat_RGB32 is actually BGRA format (4 bytes per pixel)
-                // Memory layout: [B][G][R][A] for each pixel
-                // Sharp expects RGBA format: [R][G][B][A]
-
+                // High-performance BGRA to RGBA conversion
                 const DWORD pixelCount = cbCurrentLength / 4;
-                BYTE* pixels = pData;
+                DWORD* pixels = reinterpret_cast<DWORD*>(pData);
 
-                // Simple byte-level conversion: BGRA -> RGBA
-                for (DWORD i = 0; i < pixelCount; ++i) {
-                  DWORD pixelOffset = i * 4;
+                // Process 8 pixels at a time for maximum cache efficiency
+                const DWORD alignedCount = (pixelCount / 8) * 8;
 
-                  // Read BGRA
-                  BYTE b = pixels[pixelOffset + 0];  // Blue
-                  BYTE g = pixels[pixelOffset + 1];  // Green
-                  BYTE r = pixels[pixelOffset + 2];  // Red
-                  BYTE a = pixels[pixelOffset + 3];  // Alpha
+                // Unrolled loop for 8 pixels at once
+                for (DWORD i = 0; i < alignedCount; i += 8) {
+                  // Load 8 pixels
+                  DWORD p0 = pixels[i];
+                  DWORD p1 = pixels[i + 1];
+                  DWORD p2 = pixels[i + 2];
+                  DWORD p3 = pixels[i + 3];
+                  DWORD p4 = pixels[i + 4];
+                  DWORD p5 = pixels[i + 5];
+                  DWORD p6 = pixels[i + 6];
+                  DWORD p7 = pixels[i + 7];
 
-                  // Write RGBA
-                  pixels[pixelOffset + 0] = r;      // Red to position 0
-                  pixels[pixelOffset + 1] = g;      // Green stays same
-                  pixels[pixelOffset + 2] = b;      // Blue to position 2
-                  pixels[pixelOffset + 3] = 255;    // Alpha = 255 (fully opaque)
+                  // Convert BGRA (0xAABBGGRR) to RGBA (0xFFRRGGBB) using bit manipulation
+                  // Extract: B=(p&0xFF), G=(p&0xFF00), R=(p&0xFF0000)
+                  // Result: A=0xFF000000, R=(B<<16), G=(G), B=(R>>16)
+                  pixels[i]     = 0xFF000000 | ((p0 & 0x0000FF00)) | ((p0 & 0x00FF0000) >> 16) | ((p0 & 0x000000FF) << 16);
+                  pixels[i + 1] = 0xFF000000 | ((p1 & 0x0000FF00)) | ((p1 & 0x00FF0000) >> 16) | ((p1 & 0x000000FF) << 16);
+                  pixels[i + 2] = 0xFF000000 | ((p2 & 0x0000FF00)) | ((p2 & 0x00FF0000) >> 16) | ((p2 & 0x000000FF) << 16);
+                  pixels[i + 3] = 0xFF000000 | ((p3 & 0x0000FF00)) | ((p3 & 0x00FF0000) >> 16) | ((p3 & 0x000000FF) << 16);
+                  pixels[i + 4] = 0xFF000000 | ((p4 & 0x0000FF00)) | ((p4 & 0x00FF0000) >> 16) | ((p4 & 0x000000FF) << 16);
+                  pixels[i + 5] = 0xFF000000 | ((p5 & 0x0000FF00)) | ((p5 & 0x00FF0000) >> 16) | ((p5 & 0x000000FF) << 16);
+                  pixels[i + 6] = 0xFF000000 | ((p6 & 0x0000FF00)) | ((p6 & 0x00FF0000) >> 16) | ((p6 & 0x000000FF) << 16);
+                  pixels[i + 7] = 0xFF000000 | ((p7 & 0x0000FF00)) | ((p7 & 0x00FF0000) >> 16) | ((p7 & 0x000000FF) << 16);
+                }
+
+                // Handle remaining pixels (0-7 pixels)
+                for (DWORD i = alignedCount; i < pixelCount; ++i) {
+                  DWORD pixel = pixels[i];
+                  pixels[i] = 0xFF000000 | ((pixel & 0x0000FF00)) | ((pixel & 0x00FF0000) >> 16) | ((pixel & 0x000000FF) << 16);
                 }
 
                 hr = buf->Unlock();

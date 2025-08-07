@@ -535,8 +535,6 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
             buf->AddRef(); // Add reference for the callback
 
             auto callback = [](Napi::Env env, Napi::Function jsCallback, ResultData* resultData) {
-              UINT32 width = resultData->width;
-              UINT32 height = resultData->height;
               IMFMediaBuffer* buffer = resultData->buffer;
 
               BYTE* bufData = nullptr;
@@ -545,15 +543,12 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
 
               if (SUCCEEDED(hr)) {
                 buffer->Unlock();
-                Napi::Object frameData = Napi::Object::New(env);
-                frameData.Set("width", Napi::Number::New(env, width));
-                frameData.Set("height", Napi::Number::New(env, height));
 
+                // Return only the raw RGBA buffer data
                 Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::Copy(env, bufData, bufLength);
-                frameData.Set("buffer", bufferN);
 
-                // Call the JavaScript frame event emitter
-                jsCallback.Call({frameData});
+                // Call the JavaScript frame event emitter with just the buffer
+                jsCallback.Call({bufferN});
               }
 
               // Release the IMFMediaBuffer

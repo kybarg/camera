@@ -103,7 +103,7 @@ HRESULT CaptureDevice::SelectDevice(int index) {
   if (SUCCEEDED(hr) || hr == S_FALSE) {
     // Create the media source object and claim exclusive access
     hr = m_ppDevices[index]->ActivateObject(IID_PPV_ARGS(&m_pSource));
-    
+
     if (SUCCEEDED(hr)) {
       // Add extra reference to keep the device claimed
       m_pSource->AddRef();
@@ -113,7 +113,7 @@ HRESULT CaptureDevice::SelectDevice(int index) {
       if (SUCCEEDED(hr)) {
         // Add reference to reader to keep it alive
         m_pReader->AddRef();
-        
+
         // Get the default format dimensions
         IMFMediaType* pMediaType = NULL;
         hr = m_pReader->GetNativeMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &pMediaType);
@@ -121,7 +121,7 @@ HRESULT CaptureDevice::SelectDevice(int index) {
           hr = MFGetAttributeSize(pMediaType, MF_MT_FRAME_SIZE, &width, &height);
           SafeRelease(&pMediaType);
         }
-        
+
         // Keep the reader alive by not releasing it here
         // This helps maintain the claim even through system sleep/wake cycles
       }
@@ -156,9 +156,9 @@ HRESULT CaptureDevice::SelectDeviceBySymbolicLink(const std::wstring& targetSymb
     for (UINT32 i = 0; i < m_cDevices; i++) {
       WCHAR* pSymbolicLink = nullptr;
       hr = m_ppDevices[i]->GetAllocatedString(
-          MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, 
+          MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
           &pSymbolicLink, nullptr);
-      
+
       if (SUCCEEDED(hr) && pSymbolicLink) {
         if (targetSymbolicLink == std::wstring(pSymbolicLink)) {
           deviceIndex = i;
@@ -175,7 +175,7 @@ HRESULT CaptureDevice::SelectDeviceBySymbolicLink(const std::wstring& targetSymb
 
     // Create the media source object and claim exclusive access
     hr = m_ppDevices[deviceIndex]->ActivateObject(IID_PPV_ARGS(&m_pSource));
-    
+
     if (SUCCEEDED(hr)) {
       // Add extra reference to keep the device claimed
       m_pSource->AddRef();
@@ -185,7 +185,7 @@ HRESULT CaptureDevice::SelectDeviceBySymbolicLink(const std::wstring& targetSymb
       if (SUCCEEDED(hr)) {
         // Add reference to reader to keep it alive
         m_pReader->AddRef();
-        
+
         // Get the default format dimensions
         IMFMediaType* pMediaType = NULL;
         hr = m_pReader->GetNativeMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &pMediaType);
@@ -193,7 +193,7 @@ HRESULT CaptureDevice::SelectDeviceBySymbolicLink(const std::wstring& targetSymb
           hr = MFGetAttributeSize(pMediaType, MF_MT_FRAME_SIZE, &width, &height);
           SafeRelease(&pMediaType);
         }
-        
+
         // Keep the reader alive by not releasing it here
         // This helps maintain the claim even through system sleep/wake cycles
       }

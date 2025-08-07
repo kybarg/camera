@@ -73,14 +73,14 @@ const Camera = require('./addon.js');
 
 async function captureCamera() {
   const camera = new Camera();
-  
+
   // Enumerate available devices
   const devices = await camera.enumerateDevices();
   console.log('Available devices:', devices);
-  
+
   // Claim device using persistent symbolic link
   await camera.claimDevice(devices[0].symbolicLink);
-  
+
   // Start capture
   camera.startCapture((frame) => {
     console.log(`Captured frame: ${frame.length} bytes`);

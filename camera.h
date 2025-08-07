@@ -22,11 +22,8 @@ class Camera : public Napi::ObjectWrap<Camera> {
   std::thread nativeThread;
 
   Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);
-  Napi::Value SelectDevice(const Napi::CallbackInfo& info);
   Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);
-  Napi::Value StartCapture(const Napi::CallbackInfo& info);
   Napi::Value StartCaptureAsync(const Napi::CallbackInfo& info);
-  Napi::Value StopCapture(const Napi::CallbackInfo& info);
   Napi::Value StopCaptureAsync(const Napi::CallbackInfo& info);
   Napi::Value GetDimensions(const Napi::CallbackInfo& info);
   Napi::Value GetSupportedFormats(const Napi::CallbackInfo& info);

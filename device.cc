@@ -81,56 +81,6 @@ std::vector<DeviceInfo> CaptureDevice::GetDevicesList() {
   return devices;
 }
 
-HRESULT CaptureDevice::SelectDevice(int index) {
-  HRESULT hr = S_OK;
-
-  // Release the existing source if it exists
-  if (m_pSource) {
-    m_pSource->Release();
-    m_pSource = NULL;
-  }
-
-  // Release existing reader
-  if (m_pReader) {
-    m_pReader->Release();
-    m_pReader = NULL;
-  }
-
-  // Initialize the COM library (ensure it's initialized)
-  hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-  // Note: S_FALSE means COM was already initialized, which is OK
-
-  if (SUCCEEDED(hr) || hr == S_FALSE) {
-    // Create the media source object and claim exclusive access
-    hr = m_ppDevices[index]->ActivateObject(IID_PPV_ARGS(&m_pSource));
-
-    if (SUCCEEDED(hr)) {
-      // Add extra reference to keep the device claimed
-      m_pSource->AddRef();
-
-      // Create the source reader immediately to maintain claim
-      hr = MFCreateSourceReaderFromMediaSource(m_pSource, NULL, &m_pReader);
-      if (SUCCEEDED(hr)) {
-        // Add reference to reader to keep it alive
-        m_pReader->AddRef();
-
-        // Get the default format dimensions
-        IMFMediaType* pMediaType = NULL;
-        hr = m_pReader->GetNativeMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &pMediaType);
-        if (SUCCEEDED(hr)) {
-          hr = MFGetAttributeSize(pMediaType, MF_MT_FRAME_SIZE, &width, &height);
-          SafeRelease(&pMediaType);
-        }
-
-        // Keep the reader alive by not releasing it here
-        // This helps maintain the claim even through system sleep/wake cycles
-      }
-    }
-  }
-
-  return hr;
-}
-
 HRESULT CaptureDevice::SelectDeviceBySymbolicLink(const std::wstring& targetSymbolicLink) {
   HRESULT hr = S_OK;
 

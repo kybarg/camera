@@ -301,6 +301,9 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
 
   if (SUCCEEDED(hr)) {
     while (isCapturing) {
+      // Early termination check to avoid blocking reads when stopping
+      if (!isCapturing) break;
+
       hr = m_pReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &llTimeStamp, &pSample);
       if (FAILED(hr)) break;
 
@@ -316,10 +319,10 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
 
         auto mftResult = S_OK;
         while (mftResult == S_OK) {
-          // Reuse pre-allocated sample and buffer
-          m_pReusableOutSample->RemoveAllBuffers();
-          hr = m_pReusableOutSample->AddBuffer(m_pReusableBuffer);
-          if (FAILED(hr)) break;
+          // Reset buffer length instead of removing/adding buffers
+          if (m_pReusableBuffer) {
+            m_pReusableBuffer->SetCurrentLength(0);
+          }
 
           outputDataBuffer.dwStreamID = 0;
           outputDataBuffer.dwStatus = 0;
@@ -347,40 +350,43 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
 
               hr = buf->Lock(&pData, &cbMaxLength, &cbCurrentLength);
               if (SUCCEEDED(hr)) {
-                // Ultra-fast BGRA to RGBA conversion using vectorized operations
-                const DWORD pixelCount = cbCurrentLength / 4;
+                // Ultra-fast BGRA to RGBA conversion using optimized bit operations
+                const DWORD pixelCount = cbCurrentLength >> 2; // Divide by 4 (faster than / 4)
                 DWORD* pixels = reinterpret_cast<DWORD*>(pData);
 
                 // Constants for bit manipulation
                 constexpr DWORD ALPHA_MASK = 0xFF000000;  // Alpha = 255
                 constexpr DWORD GREEN_MASK = 0x0000FF00;  // Green unchanged
-                constexpr DWORD BLUE_MASK  = 0x000000FF;  // Blue channel
-                constexpr DWORD RED_MASK   = 0x00FF0000;  // Red channel
 
-                // Process 16 pixels at once for maximum throughput
-                const DWORD vectorCount = pixelCount / 16;
-                const DWORD vectorPixels = vectorCount * 16;
+                // Optimized loop with better cache efficiency
+                // Process 8 pixels per iteration for optimal memory bandwidth
+                const DWORD remainder = pixelCount & 7; // pixelCount % 8
+                const DWORD vectorPixels = pixelCount - remainder;
 
-                // Vectorized processing - 16 pixels per iteration
-                for (DWORD i = 0; i < vectorPixels; i += 16) {
-                  // Process 16 pixels in parallel using loop unrolling
-                  for (DWORD j = 0; j < 16; ++j) {
-                    const DWORD pixel = pixels[i + j];
-                    // BGRA -> RGBA: Swap R&B, keep G, set A=255
-                    pixels[i + j] = ALPHA_MASK |
-                                   (pixel & GREEN_MASK) |
-                                   ((pixel & BLUE_MASK) << 16) |
-                                   ((pixel & RED_MASK) >> 16);
-                  }
+                // Main vectorized loop - 8 pixels per iteration
+                for (DWORD i = 0; i < vectorPixels; i += 8) {
+                  // Unroll 8 pixels for maximum throughput
+                  DWORD p0 = pixels[i];     DWORD p1 = pixels[i+1];
+                  DWORD p2 = pixels[i+2];   DWORD p3 = pixels[i+3];
+                  DWORD p4 = pixels[i+4];   DWORD p5 = pixels[i+5];
+                  DWORD p6 = pixels[i+6];   DWORD p7 = pixels[i+7];
+
+                  // BGRA -> RGBA: Swap R&B, keep G, set A=255
+                  pixels[i]   = ALPHA_MASK | (p0 & GREEN_MASK) | ((p0 & 0xFF) << 16) | ((p0 >> 16) & 0xFF);
+                  pixels[i+1] = ALPHA_MASK | (p1 & GREEN_MASK) | ((p1 & 0xFF) << 16) | ((p1 >> 16) & 0xFF);
+                  pixels[i+2] = ALPHA_MASK | (p2 & GREEN_MASK) | ((p2 & 0xFF) << 16) | ((p2 >> 16) & 0xFF);
+                  pixels[i+3] = ALPHA_MASK | (p3 & GREEN_MASK) | ((p3 & 0xFF) << 16) | ((p3 >> 16) & 0xFF);
+                  pixels[i+4] = ALPHA_MASK | (p4 & GREEN_MASK) | ((p4 & 0xFF) << 16) | ((p4 >> 16) & 0xFF);
+                  pixels[i+5] = ALPHA_MASK | (p5 & GREEN_MASK) | ((p5 & 0xFF) << 16) | ((p5 >> 16) & 0xFF);
+                  pixels[i+6] = ALPHA_MASK | (p6 & GREEN_MASK) | ((p6 & 0xFF) << 16) | ((p6 >> 16) & 0xFF);
+                  pixels[i+7] = ALPHA_MASK | (p7 & GREEN_MASK) | ((p7 & 0xFF) << 16) | ((p7 >> 16) & 0xFF);
                 }
 
-                // Handle remaining pixels (0-15 pixels)
+                // Handle remaining pixels (0-7 pixels)
                 for (DWORD i = vectorPixels; i < pixelCount; ++i) {
                   const DWORD pixel = pixels[i];
-                  pixels[i] = ALPHA_MASK |
-                             (pixel & GREEN_MASK) |
-                             ((pixel & BLUE_MASK) << 16) |
-                             ((pixel & RED_MASK) >> 16);
+                  pixels[i] = ALPHA_MASK | (pixel & GREEN_MASK) |
+                             ((pixel & 0xFF) << 16) | ((pixel >> 16) & 0xFF);
                 }
 
                 hr = buf->Unlock();
@@ -394,15 +400,19 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
               hr = callback(buf);
 
               if (FAILED(hr)) {
-                SafeRelease(&buf);
+                buf->Release(); // Direct release instead of SafeRelease for performance
                 break;
               }
             } else {
-              SafeRelease(&buf);
+              buf->Release(); // Direct release instead of SafeRelease for performance
             }
           }
 
-          SafeRelease(&pSample);
+          // Optimize sample release - only release if we have a sample to release
+          if (pSample) {
+            pSample->Release();
+            pSample = NULL;
+          }
 
           if (mftResult != MF_E_TRANSFORM_NEED_MORE_INPUT) {
             // Handle error condition.
@@ -413,8 +423,10 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
     }
   }
 
-  // Release resources before returning
-  SafeRelease(&pSample);
+  // Efficient cleanup - only release if needed
+  if (pSample) {
+    pSample->Release();
+  }
 
   return hr;
 }

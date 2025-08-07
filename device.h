@@ -21,10 +21,9 @@
 struct DeviceInfo {
   std::wstring friendlyName;
   std::wstring symbolicLink;
-  bool isClaimed;
 
-  DeviceInfo(const std::wstring& name, const std::wstring& link, bool claimed)
-    : friendlyName(name), symbolicLink(link), isClaimed(claimed) {}
+  DeviceInfo(const std::wstring& name, const std::wstring& link)
+    : friendlyName(name), symbolicLink(link) {}
 };
 
 template <class T>
@@ -67,7 +66,6 @@ class CaptureDevice {
 
   void Clear();
   HRESULT EnumerateDevices();
-  bool IsCameraBusy(const std::wstring& symbolicLink);
   std::vector<DeviceInfo> GetDevicesList();
   HRESULT SelectDevice(int index);
   HRESULT CreateStream();

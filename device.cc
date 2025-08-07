@@ -31,13 +31,6 @@ void CaptureDevice::Clear() {
   m_cDevices = 0;
 }
 
-// Conservative device status check
-bool CaptureDevice::IsCameraBusy(const std::wstring& symbolicLink) {
-  
-  // Device not found - assume not busy
-  return false;
-}
-
 HRESULT CaptureDevice::EnumerateDevices() {
   HRESULT hr = S_OK;
   IMFAttributes* pAttributes = NULL;
@@ -77,11 +70,8 @@ std::vector<DeviceInfo> CaptureDevice::GetDevicesList() {
     if (SUCCEEDED(hr)) {
       hr = this->m_ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, &pSymbolicLink, nullptr);
       if (SUCCEEDED(hr)) {
-        // Use our dedicated function to check if device is busy
-        std::wstring symbolicLinkStr(pSymbolicLink);
-        bool isClaimed = IsCameraBusy(symbolicLinkStr);
-
-        devices.emplace_back(DeviceInfo(pFriendlyName, pSymbolicLink, isClaimed));
+        // Create device info without isClaimed logic
+        devices.emplace_back(DeviceInfo(pFriendlyName, pSymbolicLink));
         CoTaskMemFree(pSymbolicLink);
       }
       CoTaskMemFree(pFriendlyName);

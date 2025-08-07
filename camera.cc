@@ -80,7 +80,6 @@ Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
             
             deviceInfo.Set("friendlyName", Napi::String::New(env, reinterpret_cast<const char16_t*>(deviceData[i].friendlyName.c_str())));
             deviceInfo.Set("symbolicLink", Napi::String::New(env, reinterpret_cast<const char16_t*>(deviceData[i].symbolicLink.c_str())));
-            deviceInfo.Set("isClaimed", Napi::Boolean::New(env, deviceData[i].isClaimed));
             devices.Set(i, deviceInfo);
           }
           

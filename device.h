@@ -17,6 +17,14 @@
 #ifndef CaptureDevice_H
 #define CaptureDevice_H
 
+template <class T>
+void SafeRelease(T** ppT) {
+  if (*ppT) {
+    (*ppT)->Release();
+    *ppT = NULL;
+  }
+}
+
 class CaptureDevice {
   UINT32 m_cDevices;
   IMFActivate** m_ppDevices;
@@ -24,6 +32,12 @@ class CaptureDevice {
   IMFMediaSource* m_pSource = NULL;
   IMFSourceReader* m_pReader = NULL;
   bool isCapturing = false;
+
+  // Pre-allocated buffers for better performance
+  IMFSample* m_pReusableOutSample = NULL;
+  IMFMediaBuffer* m_pReusableBuffer = NULL;
+  MFT_OUTPUT_STREAM_INFO m_StreamInfo = {0};
+  bool m_bStreamInfoInitialized = false;
 
  public:
   IMFTransform* m_pTransform = NULL;
@@ -35,6 +49,8 @@ class CaptureDevice {
   }
   ~CaptureDevice() {
     Clear();
+    SafeRelease(&m_pReusableOutSample);
+    SafeRelease(&m_pReusableBuffer);
   }
 
   UINT32 Count() const { return m_cDevices; }

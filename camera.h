@@ -25,6 +25,8 @@ class Camera : public Napi::ObjectWrap<Camera> {
   Napi::Value SelectDevice(const Napi::CallbackInfo& info);
   Napi::Value StartCapture(const Napi::CallbackInfo& info);
   Napi::Value StopCapture(const Napi::CallbackInfo& info);
+  Napi::Value GetWidth(const Napi::CallbackInfo& info);
+  Napi::Value GetHeight(const Napi::CallbackInfo& info);
 };
 
 #endif

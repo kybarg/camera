@@ -17,14 +17,6 @@
 #include <iostream>
 #include <thread>
 
-template <class T>
-void SafeRelease(T** ppT) {
-  if (*ppT) {
-    (*ppT)->Release();
-    *ppT = NULL;
-  }
-}
-
 void CaptureDevice::Clear() {
   for (UINT32 i = 0; i < m_cDevices; i++) {
     SafeRelease(&m_ppDevices[i]);
@@ -177,7 +169,6 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
   DWORD streamIndex, flags;
   LONGLONG llTimeStamp, llDuration;
   MFT_OUTPUT_DATA_BUFFER outputDataBuffer = {0};
-  MFT_OUTPUT_STREAM_INFO StreamInfo;
 
   isCapturing = true;
 
@@ -188,42 +179,47 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
   }
 
   if (SUCCEEDED(hr)) {
-    hr = m_pTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL);
+    // Pre-allocate buffers once
+    hr = m_pTransform->GetOutputStreamInfo(0, &m_StreamInfo);
+    if (SUCCEEDED(hr)) {
+      m_bStreamInfoInitialized = true;
+
+      hr = MFCreateSample(&m_pReusableOutSample);
+      if (SUCCEEDED(hr)) {
+        hr = MFCreateMemoryBuffer(m_StreamInfo.cbSize, &m_pReusableBuffer);
+        if (SUCCEEDED(hr)) {
+          hr = m_pReusableOutSample->AddBuffer(m_pReusableBuffer);
+        }
+      }
+    }
   }
 
   if (SUCCEEDED(hr)) {
     while (isCapturing) {
       hr = m_pReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &llTimeStamp, &pSample);
-      if (FAILED(hr)) break;  // Handle error
+      if (FAILED(hr)) break;
 
       if (pSample) {
         hr = pSample->SetSampleTime(llTimeStamp);
-        if (FAILED(hr)) break;  // Handle error
+        if (FAILED(hr)) break;
 
         hr = pSample->GetSampleDuration(&llDuration);
-        if (FAILED(hr)) break;  // Handle error
+        if (FAILED(hr)) break;
 
         hr = m_pTransform->ProcessInput(0, pSample, 0);
-        if (FAILED(hr)) break;  // Handle error
+        if (FAILED(hr)) break;
 
         auto mftResult = S_OK;
         while (mftResult == S_OK) {
-          hr = MFCreateSample(&pOutSample);
-          if (FAILED(hr)) break;  // Handle error
-
-          hr = m_pTransform->GetOutputStreamInfo(0, &StreamInfo);
-          if (FAILED(hr)) break;  // Handle error
-
-          hr = MFCreateMemoryBuffer(StreamInfo.cbSize, &pBuffer);
-          if (FAILED(hr)) break;  // Handle error
-
-          hr = pOutSample->AddBuffer(pBuffer);
-          if (FAILED(hr)) break;  // Handle error
+          // Reuse pre-allocated sample and buffer
+          m_pReusableOutSample->RemoveAllBuffers();
+          hr = m_pReusableOutSample->AddBuffer(m_pReusableBuffer);
+          if (FAILED(hr)) break;
 
           outputDataBuffer.dwStreamID = 0;
           outputDataBuffer.dwStatus = 0;
           outputDataBuffer.pEvents = NULL;
-          outputDataBuffer.pSample = pOutSample;
+          outputDataBuffer.pSample = m_pReusableOutSample;
 
           mftResult = m_pTransform->ProcessOutput(0, 1, &outputDataBuffer, &processOutputStatus);
           // if (FAILED(hr)) break;  // Handle error
@@ -236,7 +232,7 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
             if (FAILED(hr)) break;
 
             IMFMediaBuffer* buf = nullptr;
-            hr = pOutSample->ConvertToContiguousBuffer(&buf);
+            hr = outputDataBuffer.pSample->ConvertToContiguousBuffer(&buf);
             if (FAILED(hr)) break;
 
             if (isCapturing) {
@@ -246,14 +242,28 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
 
               hr = buf->Lock(&pData, &cbMaxLength, &cbCurrentLength);
               if (SUCCEEDED(hr)) {
-                // Assumes 4 bytes per pixel (BGRA)
+                // MFVideoFormat_RGB32 is actually BGRA format (4 bytes per pixel)
+                // Memory layout: [B][G][R][A] for each pixel
+                // Sharp expects RGBA format: [R][G][B][A]
+
                 const DWORD pixelCount = cbCurrentLength / 4;
+                BYTE* pixels = pData;
 
+                // Simple byte-level conversion: BGRA -> RGBA
                 for (DWORD i = 0; i < pixelCount; ++i) {
-                  BYTE* pixel = pData + (i * 4);
+                  DWORD pixelOffset = i * 4;
 
-                  // Swap R (pixel[2]) and B (pixel[0])
-                  std::swap(pixel[0], pixel[2]);
+                  // Read BGRA
+                  BYTE b = pixels[pixelOffset + 0];  // Blue
+                  BYTE g = pixels[pixelOffset + 1];  // Green
+                  BYTE r = pixels[pixelOffset + 2];  // Red
+                  BYTE a = pixels[pixelOffset + 3];  // Alpha
+
+                  // Write RGBA
+                  pixels[pixelOffset + 0] = r;      // Red to position 0
+                  pixels[pixelOffset + 1] = g;      // Green stays same
+                  pixels[pixelOffset + 2] = b;      // Blue to position 2
+                  pixels[pixelOffset + 3] = 255;    // Alpha = 255 (fully opaque)
                 }
 
                 hr = buf->Unlock();
@@ -275,25 +285,18 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
             }
           }
 
-          SafeRelease(&pOutSample);  // Release pOutSample after using it.
-          SafeRelease(&pBuffer);     // Release pBuffer after using it.
-        }
+          SafeRelease(&pSample);
 
-        SafeRelease(&pOutSample);
-        SafeRelease(&pBuffer);
-        SafeRelease(&pSample);
-
-        if (mftResult != MF_E_TRANSFORM_NEED_MORE_INPUT) {
-          // Handle error condition.
-          break;
+          if (mftResult != MF_E_TRANSFORM_NEED_MORE_INPUT) {
+            // Handle error condition.
+            break;
+          }
         }
       }
     }
   }
 
   // Release resources before returning
-  SafeRelease(&pOutSample);
-  SafeRelease(&pBuffer);
   SafeRelease(&pSample);
 
   return hr;

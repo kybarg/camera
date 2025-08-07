@@ -17,14 +17,6 @@
 #include "camera.h"
 #include "device.h"
 
-template <class T>
-void SafeRelease(T** ppT) {
-  if (*ppT) {
-    (*ppT)->Release();
-    *ppT = NULL;
-  }
-}
-
 struct ResultData {
   UINT32 width;
   UINT32 height;
@@ -32,7 +24,14 @@ struct ResultData {
 };
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
-  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("enumerateDevicesN", &Camera::EnumerateDevices), InstanceMethod("selectDeviceN", &Camera::SelectDevice), InstanceMethod("startCaptureN", &Camera::StartCapture), InstanceMethod("stopCaptureN", &Camera::StopCapture)});
+  Napi::Function func = DefineClass(env, "Camera", {
+    InstanceMethod("enumerateDevicesN", &Camera::EnumerateDevices), 
+    InstanceMethod("selectDeviceN", &Camera::SelectDevice), 
+    InstanceMethod("startCaptureN", &Camera::StartCapture), 
+    InstanceMethod("stopCaptureN", &Camera::StopCapture),
+    InstanceAccessor("width", &Camera::GetWidth, nullptr),
+    InstanceAccessor("height", &Camera::GetHeight, nullptr)
+  });
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
   *constructor = Napi::Persistent(func);
@@ -331,4 +330,14 @@ Napi::Value Camera::StopCapture(const Napi::CallbackInfo& info) {
 
   // Returning the Promise
   return deferred.Promise();
+}
+
+Napi::Value Camera::GetWidth(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  return Napi::Number::New(env, device.width);
+}
+
+Napi::Value Camera::GetHeight(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  return Napi::Number::New(env, device.height);
 }

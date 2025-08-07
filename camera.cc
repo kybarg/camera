@@ -542,12 +542,23 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
               HRESULT hr = buffer->Lock(&bufData, nullptr, &bufLength);
 
               if (SUCCEEDED(hr)) {
+                // Create a copy of the buffer data that Node.js will own
+                BYTE* ownedData = new BYTE[bufLength];
+                memcpy(ownedData, bufData, bufLength);
+
                 buffer->Unlock();
 
-                // Return only the raw RGBA buffer data
-                Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::Copy(env, bufData, bufLength);
+                // Create Node.js buffer with finalizer for automatic cleanup
+                Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::New(
+                  env,
+                  ownedData,
+                  bufLength,
+                  [](Napi::Env env, BYTE* data) {
+                    delete[] data; // Automatic cleanup when Node.js is done with the buffer
+                  }
+                );
 
-                // Call the JavaScript frame event emitter with just the buffer
+                // Call the JavaScript frame event emitter with the zero-copy buffer
                 jsCallback.Call({bufferN});
               }
 

@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const sharp = require("sharp");
-const Camera = require("./addon.js");
+const Camera = require("../addon.js");
 
 try {
   let snapshot;
@@ -14,10 +14,10 @@ try {
     .enumerateDevices()
     .then((devices) => {
       console.log("2. Enumerate Devices", devices);
-      return camera.selectDevice(0);
+      return camera.claimDevice(devices[0].symbolicLink);
     })
     .then(() => {
-      console.log("3. Select Device");
+      console.log("3. Claim Device");
       return camera.startCapture((error, result) => {
         if (error) {
           console.error(error);
@@ -49,7 +49,7 @@ try {
         console.log("Saving snapshot as JPG...");
 
         // Ensure snapshots directory exists
-        const snapshotsDir = path.join(__dirname, 'snapshots');
+        const snapshotsDir = path.join(__dirname, '../snapshots');
         if (!fs.existsSync(snapshotsDir)) {
           fs.mkdirSync(snapshotsDir, { recursive: true });
         }

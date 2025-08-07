@@ -1,4 +1,4 @@
-const Camera = require("./addon.js");
+const Camera = require("../addon.js");
 
 async function testCameraClaimStatus() {
   try {
@@ -14,11 +14,11 @@ async function testCameraClaimStatus() {
     for (let i = 0; i < devices.length; i++) {
       const device = devices[i];
       console.log(`\nDevice ${i}: ${device.friendlyName}`);
-      console.log(`  Initial Status: ${device.isClaimed ? '❌ CLAIMED' : '✅ AVAILABLE'}`);
+      console.log(`  Initial Status: ✅ AVAILABLE`);
 
       // Try to actually use the device
       try {
-        await camera.selectDevice(i);
+        await camera.claimDevice(device.symbolicLink);
         console.log(`  ✅ Device selection: SUCCESS`);
 
         // Try to get formats

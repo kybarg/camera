@@ -5,7 +5,7 @@ class Camera extends addon.Camera {
   constructor() {
     super(); // Call the parent constructor
     this.enumerateDevices = this.enumerateDevicesAsync; // Use the new async method
-    this.selectDevice = util.promisify(this.selectDeviceN.bind(this));
+    this.claimDevice = this.claimDeviceAsync; // Use the new async method
 
     this.tmp = null;
 

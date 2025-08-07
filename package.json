@@ -4,6 +4,13 @@
   "description": "Node.js Addons to work with web cameras",
   "main": "addon.js",
   "private": false,
+  "scripts": {
+    "test": "node tests/test-claim-device.js",
+    "test:all": "node tests/test-claim-device.js && node tests/camera-claim-test.js && node tests/test-symlink-persistence.js",
+    "example": "node examples/example.js",
+    "example:format": "node examples/format-example.js",
+    "example:devices": "node examples/devices-status-example.js"
+  },
   "dependencies": {
     "bindings": "^1.5.0",
     "node-addon-api": "^7.1.1",

@@ -27,6 +27,7 @@ Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
   Napi::Function func = DefineClass(env, "Camera", {
     InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync),
     InstanceMethod("selectDeviceN", &Camera::SelectDevice),
+    InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync),
     InstanceMethod("startCaptureN", &Camera::StartCapture),
     InstanceMethod("stopCaptureN", &Camera::StopCapture),
     InstanceMethod("getDimensions", &Camera::GetDimensions),
@@ -84,6 +85,68 @@ Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
           }
           
           deferred.Resolve(devices);
+        };
+        
+        tsfnPromise.BlockingCall(callback);
+      } else {
+        auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
+          _com_error err(hr);
+          LPCTSTR errMsg = err.ErrorMessage();
+          std::string message = errMsg;
+          deferred.Reject(Napi::Error::New(env, message).Value());
+        };
+        
+        tsfnPromise.BlockingCall(callback);
+      }
+    } catch (const std::exception& e) {
+      auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
+        deferred.Reject(Napi::Error::New(env, message).Value());
+      };
+      
+      tsfnPromise.BlockingCall(callback);
+    }
+    
+    tsfnPromise.Release();
+  }).detach();
+  
+  return deferred.Promise();
+}
+
+Napi::Value Camera::ClaimDeviceAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected device symbolic link as string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  std::u16string symbolicLinkU16 = info[0].As<Napi::String>().Utf16Value();
+  std::wstring symbolicLink(symbolicLinkU16.begin(), symbolicLinkU16.end());
+  
+  // Create a promise
+  auto deferred = Napi::Promise::Deferred::New(env);
+  
+  // Create thread-safe function for the promise resolution
+  auto tsfnPromise = Napi::ThreadSafeFunction::New(
+    env,
+    Napi::Function(),
+    "ClaimDeviceAsync",
+    0,
+    1
+  );
+  
+  // Start async operation
+  std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), symbolicLink]() mutable {
+    try {
+      HRESULT hr = device.SelectDeviceBySymbolicLink(symbolicLink);
+      
+      if (SUCCEEDED(hr)) {
+        auto callback = [deferred = std::move(deferred), symbolicLink](Napi::Env env, Napi::Function) mutable {
+          Napi::Object result = Napi::Object::New(env);
+          result.Set("success", Napi::Boolean::New(env, true));
+          result.Set("message", Napi::String::New(env, "Device claimed successfully"));
+          result.Set("symbolicLink", Napi::String::New(env, reinterpret_cast<const char16_t*>(symbolicLink.c_str())));
+          deferred.Resolve(result);
         };
         
         tsfnPromise.BlockingCall(callback);

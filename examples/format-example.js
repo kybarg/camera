@@ -1,4 +1,4 @@
-const Camera = require("./addon.js");
+const Camera = require("../addon.js");
 
 async function demonstrateFormatFeatures() {
   try {
@@ -8,8 +8,8 @@ async function demonstrateFormatFeatures() {
     const devices = await camera.enumerateDevices();
     console.log("Available devices:", devices);
 
-    await camera.selectDevice(0);
-    console.log("Device selected");
+    await camera.claimDevice(devices[0].symbolicLink);
+    console.log("Device claimed successfully");
 
     // Get all supported formats (resolution + frame rate combinations)
     const formats = camera.getSupportedFormats();

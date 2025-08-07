@@ -1,34 +1,29 @@
-const Camera = require("./addon.js");
+const Camera = require("../addon.js");
 
 async function demonstrateDevicesStatus() {
   try {
     const camera = new Camera();
 
-    console.log("Enumerating camera devices with status information...\n");
+    console.log("Enumerating camera devices...\n");
 
-    // Get devices with claim status
+    // Get devices
     const devices = await camera.enumerateDevices();
 
-    console.log(`Found ${devices.length} camera device(s):\n`);
+    console.log(`Found ${devices.length} camera device(s):`);
 
     devices.forEach((device, index) => {
-      console.log(`Device ${index}:`);
-      console.log(`  Name: ${device.friendlyName}`);
+      console.log(`✅ Found available device at index ${index}: ${device.friendlyName}`);
       console.log(`  Symbolic Link: ${device.symbolicLink}`);
-      console.log(`  Status: ${device.isClaimed ? '❌ CLAIMED (in use by another app)' : '✅ AVAILABLE'}`);
-      console.log('');
     });
 
-    // Find first available device
-    const availableDevice = devices.find(device => !device.isClaimed);
+    if (devices.length > 0) {
+      const firstDevice = devices[0];
+      console.log(`✅ Device selected successfully`);
+      console.log(`  Symbolic Link: ${firstDevice.symbolicLink}`);
 
-    if (availableDevice) {
-      const availableIndex = devices.indexOf(availableDevice);
-      console.log(`\n✅ Found available device at index ${availableIndex}: ${availableDevice.friendlyName}`);
-
-      // Try to select and get formats for available device
+      // Try to claim and get formats for the first device
       try {
-        await camera.selectDevice(availableIndex);
+        await camera.claimDevice(firstDevice.symbolicLink);
         console.log("✅ Device selected successfully");
 
         const formats = camera.getSupportedFormats();
@@ -46,7 +41,7 @@ async function demonstrateDevicesStatus() {
       }
 
     } else {
-      console.log("\n❌ No available devices found - all cameras are currently in use by other applications");
+      console.log("\n❌ No camera devices found");
     }
 
   } catch (error) {

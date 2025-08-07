@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <tuple>
+#include <cmath>
 
 void CaptureDevice::Clear() {
   for (UINT32 i = 0; i < m_cDevices; i++) {
@@ -99,6 +100,18 @@ HRESULT CaptureDevice::SelectDevice(int index) {
   // If successful, add a reference to m_pSource
   if (SUCCEEDED(hr)) {
     m_pSource->AddRef();
+
+    // Create the source reader for format enumeration
+    hr = MFCreateSourceReaderFromMediaSource(m_pSource, NULL, &m_pReader);
+    if (SUCCEEDED(hr)) {
+      // Get the default format dimensions
+      IMFMediaType* pMediaType = NULL;
+      hr = m_pReader->GetNativeMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &pMediaType);
+      if (SUCCEEDED(hr)) {
+        hr = MFGetAttributeSize(pMediaType, MF_MT_FRAME_SIZE, &width, &height);
+        SafeRelease(&pMediaType);
+      }
+    }
   }
 
   return hr;
@@ -109,8 +122,11 @@ HRESULT CaptureDevice::CreateStream() {
   IMFMediaType *pSrcOutMediaType = NULL, *pMFTInputMediaType = NULL, *pMFTOutputMediaType = NULL;
   IUnknown* colorConvTransformUnk = NULL;
 
-  hr = MFCreateSourceReaderFromMediaSource(m_pSource, NULL, &m_pReader);
-  if (FAILED(hr)) goto CleanUp;
+  // Create reader if it doesn't exist (it should exist from SelectDevice)
+  if (!m_pReader) {
+    hr = MFCreateSourceReaderFromMediaSource(m_pSource, NULL, &m_pReader);
+    if (FAILED(hr)) goto CleanUp;
+  }
 
   hr = m_pReader->GetNativeMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &pSrcOutMediaType);
   if (FAILED(hr)) goto CleanUp;
@@ -347,7 +363,11 @@ std::vector<std::tuple<UINT32, UINT32, UINT32>> CaptureDevice::GetSupportedForma
       UINT32 numerator, denominator;
       UINT32 frameRate = 30; // Default fallback
       if (SUCCEEDED(MFGetAttributeRatio(pMediaType, MF_MT_FRAME_RATE, &numerator, &denominator))) {
-        frameRate = (denominator > 0) ? (numerator / denominator) : 30;
+        if (denominator > 0) {
+          // Calculate frame rate with proper rounding for fractional rates
+          // For example: 30000/1001 ≈ 29.97 → rounds to 30
+          frameRate = static_cast<UINT32>((static_cast<double>(numerator) / static_cast<double>(denominator)) + 0.5);
+        }
       }
 
       // Check if this format combination is already in the list
@@ -404,7 +424,10 @@ HRESULT CaptureDevice::SetDesiredFormat(UINT32 desiredWidth, UINT32 desiredHeigh
       UINT32 numerator, denominator;
       UINT32 frameRate = 30; // Default fallback
       if (SUCCEEDED(MFGetAttributeRatio(pMediaType, MF_MT_FRAME_RATE, &numerator, &denominator))) {
-        frameRate = (denominator > 0) ? (numerator / denominator) : 30;
+        if (denominator > 0) {
+          // Calculate frame rate with proper rounding for fractional rates
+          frameRate = static_cast<UINT32>((static_cast<double>(numerator) / static_cast<double>(denominator)) + 0.5);
+        }
       }
 
       // Calculate similarity score (lower is better)

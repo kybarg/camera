@@ -7,13 +7,13 @@ async function demonstrateFormatFeatures() {
     // Enumerate and select device
     const devices = await camera.enumerateDevices();
     console.log("Available devices:", devices);
-    
+
     await camera.selectDevice(0);
     console.log("Device selected");
 
     // Get all supported formats (resolution + frame rate combinations)
     const formats = camera.getSupportedFormats();
-    console.log("\nSupported Formats:");
+    console.log("\nSupported Formats:", formats);
     formats.forEach((format, index) => {
       console.log(`  ${index + 1}. ${format.width}x${format.height} @ ${format.frameRate}fps`);
     });
@@ -22,6 +22,8 @@ async function demonstrateFormatFeatures() {
       // Set a specific format
       console.log("\nTrying to set 1080p at 30 FPS...");
       const formatResult = camera.setDesiredFormat(1920, 1080, 30);
+
+      console.log(formatResult)
       if (formatResult.success) {
         console.log(`✓ Format set successfully: ${formatResult.actualWidth}x${formatResult.actualHeight}`);
       } else {

@@ -25,11 +25,7 @@
   ],
   "scripts": {
     "build": "node-gyp rebuild",
-    "test": "node tests/test-claim-device.js",
-    "test:all": "node tests/test-claim-device.js && node tests/camera-claim-test.js && node tests/test-symlink-persistence.js",
     "example": "node examples/example.js",
-    "example:format": "node examples/format-example.js",
-    "example:devices": "node examples/devices-status-example.js",
     "example-ts": "npx ts-node examples/typescript-example.ts",
     "type-check": "tsc --noEmit",
     "prepublishOnly": "npm run build && npm run type-check"

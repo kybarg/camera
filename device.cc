@@ -1,9 +1,7 @@
 #include "device.h"
 #include <Wmcodecdsp.h>
 #include <algorithm>
-#include <cfloat>
 #include <chrono>
-#include <cmath>
 #include <thread>
 
 void CaptureDevice::Clear() {

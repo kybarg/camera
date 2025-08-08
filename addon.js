@@ -13,8 +13,8 @@ class Camera extends EventEmitter {
     this.claimDevice = this._nativeCamera.claimDeviceAsync.bind(this._nativeCamera);
 
     // Bind other native methods
-    this.getSupportedFormats = this._nativeCamera.getSupportedFormats.bind(this._nativeCamera);
-    this.setDesiredFormat = this._nativeCamera.setDesiredFormat.bind(this._nativeCamera);
+    this.getSupportedFormats = this._nativeCamera.getSupportedFormatsAsync.bind(this._nativeCamera);
+    this.setDesiredFormat = this._nativeCamera.setDesiredFormatAsync.bind(this._nativeCamera);
     this.getDimensions = this._nativeCamera.getDimensions.bind(this._nativeCamera);
 
     this.tmp = null;

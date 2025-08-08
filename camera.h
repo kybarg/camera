@@ -17,17 +17,14 @@ class Camera : public Napi::ObjectWrap<Camera> {
   ~Camera();
 
   CaptureDevice device;
-  Napi::ThreadSafeFunction tsfn;
-  Napi::ThreadSafeFunction tsfnCapturing;
-  std::thread nativeThread;
 
   Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);
   Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);
   Napi::Value StartCaptureAsync(const Napi::CallbackInfo& info);
   Napi::Value StopCaptureAsync(const Napi::CallbackInfo& info);
   Napi::Value GetDimensions(const Napi::CallbackInfo& info);
-  Napi::Value GetSupportedFormats(const Napi::CallbackInfo& info);
-  Napi::Value SetDesiredFormat(const Napi::CallbackInfo& info);
+  Napi::Value GetSupportedFormatsAsync(const Napi::CallbackInfo& info);
+  Napi::Value SetDesiredFormatAsync(const Napi::CallbackInfo& info);
 };
 
 #endif

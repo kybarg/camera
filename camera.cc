@@ -1,6 +1,5 @@
 #include "camera.h"
 #include <comdef.h>
-#include <tchar.h>
 #include <thread>
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
@@ -28,7 +27,7 @@ Camera::Camera(const Napi::CallbackInfo& info)
   Napi::Env env = info.Env();
 }
 
-Camera::~Camera() {}
+Camera::~Camera() = default;
 
 Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();

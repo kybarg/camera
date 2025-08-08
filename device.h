@@ -3,7 +3,6 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <mftransform.h>
-#include <napi.h>
 #include <windows.h>
 #include <string>
 #include <vector>
@@ -72,8 +71,7 @@ class CaptureDevice {
   std::vector<std::tuple<UINT32, UINT32, UINT32>> GetSupportedFormats();
   HRESULT SetDesiredFormat(UINT32 desiredWidth, UINT32 desiredHeight, UINT32 desiredFrameRate);
 
-  // Device validation method
-  bool IsDeviceValid();
+  // (was: IsDeviceValid) — removed as unused
 };
 
 #endif  // CaptureDevice_H

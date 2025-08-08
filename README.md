@@ -42,23 +42,12 @@ npm run example
 # TypeScript camera capture example
 npm run example-ts
 
-# Format management
-npm run example:format
-
-# Device status demonstration
-npm run example:devices
+# Format management and device status demos are available in the examples directory.
 ```
 
-### Running Tests
+### Type Checking
 
 ```bash
-# Run main test
-npm test
-
-# Run all tests
-npm run test:all
-
-# TypeScript type checking
 npm run type-check
 ```
 
@@ -164,33 +153,12 @@ npm run example
 npm run example-ts
 # or: npx ts-node examples/typescript-example.ts
 
-# Format management
-npm run example:format
-# or: node examples/format-example.js
-
-# Device status demonstration
-npm run example:devices
-# or: node examples/devices-status-example.js
+# See additional demos in the examples/ directory.
 ```
 
 ## Tests
 
-Run tests from the `tests/` directory:
-
-```bash
-# Test device claiming
-npm test
-# or: node tests/test-claim-device.js
-
-# Test camera availability
-node tests/camera-claim-test.js
-
-# Test symbolic link persistence
-node tests/test-symlink-persistence.js
-
-# Run all tests
-npm run test:all
-```
+This project currently has no automated tests.
 
 ## API Reference
 
@@ -283,7 +251,7 @@ camera.on('frame', (frameData: Buffer) => {
 
 ### TypeScript Support
 
-For full TypeScript documentation and examples, see [TYPESCRIPT.md](TYPESCRIPT.md).
+For TypeScript usage, see `examples/typescript-example.ts`.
 
 ## Available Scripts
 
@@ -292,8 +260,6 @@ npm run build         # Build the native addon
 npm run example       # Run JavaScript example
 npm run example-ts    # Run TypeScript example
 npm run type-check    # Check TypeScript types
-npm test             # Run main test
-npm run test:all     # Run all tests
 ```
 
 ## Requirements
@@ -305,7 +271,7 @@ npm run test:all     # Run all tests
 
 ## Migration
 
-For migration from the old `selectDevice()` API, see [MIGRATION.md](MIGRATION.md).
+If you used older APIs, check the examples for the current async methods.
 
 ## License
 

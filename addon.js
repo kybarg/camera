@@ -18,17 +18,11 @@ class Camera extends EventEmitter {
     this.setDesiredFormat = this._nativeCamera.setDesiredFormatAsync.bind(this._nativeCamera);
     this.getDimensions = this._nativeCamera.getDimensions.bind(this._nativeCamera);
 
-    this.tmp = null;
     this._isCapturing = false;
 
-    // Set up frame event emitter function for native code
-    this._setupFrameEventEmitter();
-  }
-
-  _setupFrameEventEmitter() {
-    // This function will be called by native code for each frame
+    // Frame event emitter used by native code
     this._frameEventEmitter = (frameData) => {
-      this.tmp = frameData; // Keep frame in scope
+      // Keep reference alive until event handlers run
       this.emit('frame', frameData);
     };
   }

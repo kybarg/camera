@@ -778,35 +778,3 @@ HRESULT CaptureDevice::SetDesiredFormat(UINT32 desiredWidth, UINT32 desiredHeigh
 
   return hr;
 }
-
-bool CaptureDevice::IsDeviceValid() {
-  // Check if we have a device source
-  if (!m_pSource) {
-    return false;
-  }
-
-  try {
-    // Try to create a presentation descriptor to test if device is alive
-    IMFPresentationDescriptor* pPD = nullptr;
-    HRESULT hr = m_pSource->CreatePresentationDescriptor(&pPD);
-
-    if (pPD) {
-      pPD->Release();
-    }
-
-    // Also check if the reader is still valid
-    if (SUCCEEDED(hr) && m_pReader) {
-      IMFMediaType* pMediaType = nullptr;
-      HRESULT readerHr = m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &pMediaType);
-      if (pMediaType) {
-        pMediaType->Release();
-      }
-      return SUCCEEDED(hr) && SUCCEEDED(readerHr);
-    }
-
-    return SUCCEEDED(hr);
-  } catch (...) {
-    // Any exception means device is not valid
-    return false;
-  }
-}

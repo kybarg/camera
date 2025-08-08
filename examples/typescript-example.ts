@@ -1,13 +1,14 @@
-const fs = require("node:fs");
-const path = require("node:path");
-const sharp = require("sharp");
-const { exec } = require("node:child_process");
+import * as fs from "node:fs";
+import * as path from "node:path";
+import sharp from "sharp";
+import { exec } from "node:child_process";
 const Camera = require("../addon.js");
+import type { DeviceInfo, CameraFormat, CameraDimensions, OperationResult } from "../index.d.ts";
 
-async function takeCameraSnapshot() {
-  let cameraWidth = 640; // Default fallback
-  let cameraHeight = 480; // Default fallback
-  let snapshotSaved = false; // Flag to track if snapshot has been saved
+async function takeCameraSnapshot(): Promise<void> {
+  let cameraWidth: number = 640; // Default fallback
+  let cameraHeight: number = 480; // Default fallback
+  let snapshotSaved: boolean = false; // Flag to track if snapshot has been saved
 
   const camera = new Camera();
 
@@ -16,9 +17,9 @@ async function takeCameraSnapshot() {
 
     // Step 1: Enumerate available camera devices
     console.log("1️⃣ 📷 Enumerating camera devices...");
-    const devices = await camera.enumerateDevices();
+    const devices: DeviceInfo[] = await camera.enumerateDevices();
     console.log(`✅ Found ${devices.length} camera device(s):`);
-    devices.forEach((device, index) => {
+    devices.forEach((device: DeviceInfo, index: number) => {
       console.log(`   📹 Device ${index}: ${device.friendlyName}`);
     });
     console.log("");
@@ -36,13 +37,13 @@ async function takeCameraSnapshot() {
 
     // Step 3: Get supported formats and set highest resolution
     console.log("3️⃣ 📋 Getting supported camera formats...");
-    const formats = await camera.getSupportedFormats();
+    const formats: CameraFormat[] = await camera.getSupportedFormats();
     console.log(`✅ Found ${formats.length} supported format(s):`);
 
     // Display first few formats for reference
-    const displayCount = Math.min(5, formats.length);
+    const displayCount: number = Math.min(5, formats.length);
     for (let i = 0; i < displayCount; i++) {
-      const format = formats[i];
+      const format: CameraFormat = formats[i];
       console.log(
         `   📐 Format ${i + 1}: ${format.width}x${format.height} @ ${
           format.frameRate
@@ -59,11 +60,11 @@ async function takeCameraSnapshot() {
       console.log("4️⃣ ⚙️ Selecting highest resolution format...");
 
       // Find the format with the highest resolution (width * height)
-      let bestFormat = formats[0];
-      let maxPixels = bestFormat.width * bestFormat.height;
+      let bestFormat: CameraFormat = formats[0];
+      let maxPixels: number = bestFormat.width * bestFormat.height;
 
       for (const format of formats) {
-        const pixels = format.width * format.height;
+        const pixels: number = format.width * format.height;
         if (pixels > maxPixels) {
           maxPixels = pixels;
           bestFormat = format;
@@ -85,7 +86,7 @@ async function takeCameraSnapshot() {
         console.log("✅ Format set successfully");
       } catch (error) {
         console.log(
-          `⚠️ Could not set desired format, using default: ${error.message}`
+          `⚠️ Could not set desired format, using default: ${(error as Error).message}`
         );
       }
     } else {
@@ -95,7 +96,7 @@ async function takeCameraSnapshot() {
 
     // Step 5: Get final camera dimensions
     console.log("5️⃣ 📐 Getting final camera dimensions...");
-    const dimensions = camera.getDimensions();
+    const dimensions: CameraDimensions = camera.getDimensions();
     cameraWidth = dimensions.width;
     cameraHeight = dimensions.height;
     console.log(
@@ -105,7 +106,7 @@ async function takeCameraSnapshot() {
 
     // Step 6: Set up frame event listener
     console.log("6️⃣ 📡 Setting up frame event listener...");
-    camera.on("frame", async (frameBuffer) => {
+    camera.on("frame", async (frameBuffer: Buffer) => {
       // Only process the first frame
       if (!snapshotSaved && frameBuffer && frameBuffer.length > 0) {
         snapshotSaved = true; // Prevent multiple snapshots
@@ -117,15 +118,15 @@ async function takeCameraSnapshot() {
 
         try {
           // Ensure snapshots directory exists
-          const snapshotsDir = path.join(__dirname, "../snapshots");
+          const snapshotsDir: string = path.join(__dirname, "../snapshots");
           if (!fs.existsSync(snapshotsDir)) {
             console.log("📁 Creating snapshots directory...");
             fs.mkdirSync(snapshotsDir, { recursive: true });
           }
 
           // Convert RGBA buffer to JPG using Sharp
-          const filename = `snapshot_${Date.now()}.jpg`;
-          const filepath = path.join(snapshotsDir, filename);
+          const filename: string = `snapshot_${Date.now()}.jpg`;
+          const filepath: string = path.join(snapshotsDir, filename);
 
           console.log("🎨 Converting RGBA buffer to JPG...");
           await sharp(frameBuffer, {
@@ -150,14 +151,14 @@ async function takeCameraSnapshot() {
 
           // Open the saved image with default system app
           console.log("9️⃣ 🖼️  Opening image with default app...");
-          const command =
+          const command: string =
             process.platform === "win32"
               ? `start "" "${filepath}"`
               : process.platform === "darwin"
               ? `open "${filepath}"`
               : `xdg-open "${filepath}"`;
 
-          exec(command, async (error, stdout, stderr) => {
+          exec(command, async (error: any, stdout: any, stderr: any) => {
             if (error) {
               console.error(`❌ Error opening image: ${error.message}`);
             } else {
@@ -196,7 +197,7 @@ async function takeCameraSnapshot() {
     // Step 7: Start camera capture
     console.log("7️⃣ 🎬 Starting camera capture...");
     try {
-      const result = await camera.startCapture();
+      const result: OperationResult = await camera.startCapture();
       console.log("✅ Camera capture started successfully");
       console.log("⏳ Waiting for first frame...");
       console.log("");

@@ -1,6 +1,6 @@
 {
   "name": "@kybarg/camera",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Node.js Addons to work with web cameras",
   "main": "addon.js",
   "types": "index.d.ts",

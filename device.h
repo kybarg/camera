@@ -38,8 +38,6 @@ class CaptureDevice {
   UINT32 m_cDevices;
   IMFActivate** m_ppDevices;
 
-  IMFMediaSource* m_pSource = NULL;
-  IMFSourceReader* m_pReader = NULL;
   bool isCapturing = false;
 
   // Pre-allocated buffers for better performance
@@ -50,6 +48,8 @@ class CaptureDevice {
 
  public:
   IMFTransform* m_pTransform = NULL;
+  IMFMediaSource* m_pSource = NULL;
+  IMFSourceReader* m_pReader = NULL;
   UINT32 width = 0;
   UINT32 height = 0;
 
@@ -76,6 +76,9 @@ class CaptureDevice {
   // New methods for resolution and framerate management
   std::vector<std::tuple<UINT32, UINT32, UINT32>> GetSupportedFormats();
   HRESULT SetDesiredFormat(UINT32 desiredWidth, UINT32 desiredHeight, UINT32 desiredFrameRate);
+  
+  // Device validation method
+  bool IsDeviceValid();
 };
 
 #endif  // CaptureDevice_H

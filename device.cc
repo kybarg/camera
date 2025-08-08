@@ -124,7 +124,7 @@ HRESULT CaptureDevice::SelectDeviceBySymbolicLink(const std::wstring& targetSymb
       if (!m_ppDevices[i]) {
         continue; // Skip null devices
       }
-      
+
       WCHAR* pSymbolicLink = nullptr;
       hr = m_ppDevices[i]->GetAllocatedString(
           MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
@@ -133,7 +133,7 @@ HRESULT CaptureDevice::SelectDeviceBySymbolicLink(const std::wstring& targetSymb
       if (SUCCEEDED(hr) && pSymbolicLink) {
         bool isMatch = (targetSymbolicLink == std::wstring(pSymbolicLink));
         CoTaskMemFree(pSymbolicLink);
-        
+
         if (isMatch) {
           deviceIndex = i;
           break;
@@ -156,7 +156,7 @@ HRESULT CaptureDevice::SelectDeviceBySymbolicLink(const std::wstring& targetSymb
     const int MAX_ACTIVATION_ATTEMPTS = 3;
     for (int attempt = 0; attempt < MAX_ACTIVATION_ATTEMPTS; attempt++) {
       hr = m_ppDevices[deviceIndex]->ActivateObject(IID_PPV_ARGS(&m_pSource));
-      
+
       if (SUCCEEDED(hr)) {
         break;
       } else if (attempt < MAX_ACTIVATION_ATTEMPTS - 1) {
@@ -179,14 +179,14 @@ HRESULT CaptureDevice::SelectDeviceBySymbolicLink(const std::wstring& targetSymb
       const int MAX_READER_ATTEMPTS = 3;
       for (int attempt = 0; attempt < MAX_READER_ATTEMPTS; attempt++) {
         hr = MFCreateSourceReaderFromMediaSource(m_pSource, NULL, &m_pReader);
-        
+
         if (SUCCEEDED(hr)) {
           break;
         } else if (attempt < MAX_READER_ATTEMPTS - 1) {
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
       }
-      
+
       if (SUCCEEDED(hr) && m_pReader) {
         // Validate the reader by trying to get a media type
         IMFMediaType* pMediaType = NULL;
@@ -264,11 +264,11 @@ HRESULT CaptureDevice::ReleaseDevice() {
     // Try to shutdown the source gracefully
     IMFMediaSource* pSource = m_pSource;
     m_pSource = NULL; // Clear pointer first to prevent race conditions
-    
+
     // Shutdown source
     HRESULT shutdownHr = pSource->Shutdown();
     pSource->Release();
-    
+
     if (FAILED(shutdownHr) && SUCCEEDED(hr)) {
       hr = shutdownHr;
     }
@@ -305,7 +305,7 @@ HRESULT CaptureDevice::CreateStream() {
   // Get source media type with validation
   hr = m_pReader->GetNativeMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &pSrcOutMediaType);
   if (FAILED(hr)) goto CleanUp;
-  
+
   if (!pSrcOutMediaType) {
     hr = E_POINTER;
     goto CleanUp;
@@ -436,7 +436,7 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
             hr = m_pReusableOutSample->AddBuffer(m_pReusableBuffer);
           }
         }
-        
+
         if (FAILED(hr)) {
           isCapturing = false;
           return hr;
@@ -461,14 +461,14 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
       if (!isCapturing) break;
 
       hr = m_pReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &llTimeStamp, &pSample);
-      
+
       // Handle device disconnection gracefully
-      if (hr == MF_E_VIDEO_RECORDING_DEVICE_INVALIDATED || 
+      if (hr == MF_E_VIDEO_RECORDING_DEVICE_INVALIDATED ||
           hr == MF_E_VIDEO_RECORDING_DEVICE_PREEMPTED ||
           hr == HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_CONNECTED)) {
         break; // Device disconnected - exit gracefully
       }
-      
+
       if (FAILED(hr)) {
         consecutiveErrors++;
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
@@ -649,7 +649,7 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
           }
         }
       }
-      
+
       // Final cleanup of sample if still present
       SafeRelease(&pSample);
     }
@@ -826,11 +826,11 @@ bool CaptureDevice::IsDeviceValid() {
     // Try to create a presentation descriptor to test if device is alive
     IMFPresentationDescriptor* pPD = nullptr;
     HRESULT hr = m_pSource->CreatePresentationDescriptor(&pPD);
-    
+
     if (pPD) {
       pPD->Release();
     }
-    
+
     // Also check if the reader is still valid
     if (SUCCEEDED(hr) && m_pReader) {
       IMFMediaType* pMediaType = nullptr;
@@ -840,7 +840,7 @@ bool CaptureDevice::IsDeviceValid() {
       }
       return SUCCEEDED(hr) && SUCCEEDED(readerHr);
     }
-    
+
     return SUCCEEDED(hr);
   } catch (...) {
     // Any exception means device is not valid

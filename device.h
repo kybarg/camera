@@ -76,7 +76,7 @@ class CaptureDevice {
   // New methods for resolution and framerate management
   std::vector<std::tuple<UINT32, UINT32, UINT32>> GetSupportedFormats();
   HRESULT SetDesiredFormat(UINT32 desiredWidth, UINT32 desiredHeight, UINT32 desiredFrameRate);
-  
+
   // Device validation method
   bool IsDeviceValid();
 };

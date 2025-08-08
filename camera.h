@@ -1,13 +1,7 @@
 #ifndef CAMERA_H
 #define CAMERA_H
 
-#include <mfapi.h>
-#include <mferror.h>
-#include <mfidl.h>
-#include <mfreadwrite.h>
-#include <mftransform.h>
 #include <napi.h>
-#include <thread>
 #include "device.h"
 
 class Camera : public Napi::ObjectWrap<Camera> {

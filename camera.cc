@@ -1,21 +1,7 @@
-#include <Wmcodecdsp.h>
-#include <assert.h>
-#include <comdef.h>
-#include <inttypes.h>
-#include <mfapi.h>
-#include <mferror.h>
-#include <mfidl.h>
-#include <mfreadwrite.h>
-#include <mftransform.h>
-#include <napi.h>
-#include <tchar.h>
-#include <windows.h>
-#include <chrono>
-#include <iostream>
-#include <thread>
-
 #include "camera.h"
-#include "device.h"
+#include <comdef.h>
+#include <tchar.h>
+#include <thread>
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
   Napi::Function func = DefineClass(env, "Camera", {

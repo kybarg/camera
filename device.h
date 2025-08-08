@@ -1,18 +1,14 @@
-#include <Wmcodecdsp.h>
-#include <assert.h>
-#include <comdef.h>
-#include <inttypes.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <mftransform.h>
 #include <napi.h>
-#include <tchar.h>
 #include <windows.h>
-#include <chrono>
-#include <iostream>
-#include <thread>
+#include <string>
+#include <vector>
+#include <tuple>
+#include <functional>
 
 #ifndef CaptureDevice_H
 #define CaptureDevice_H
@@ -57,9 +53,8 @@ class CaptureDevice {
       : m_ppDevices(NULL), m_cDevices(0) {
   }
   ~CaptureDevice() {
-    Clear();
-    SafeRelease(&m_pReusableOutSample);
-    SafeRelease(&m_pReusableBuffer);
+    ReleaseDevice(); // Properly release all media resources
+    Clear();         // Clear device enumeration
   }
 
   UINT32 Count() const { return m_cDevices; }

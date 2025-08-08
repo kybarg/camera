@@ -1,26 +1,10 @@
-#pragma once
-
 #include "device.h"
 #include <Wmcodecdsp.h>
-#include <assert.h>
-#include <comdef.h>
-#include <inttypes.h>
-#include <mfapi.h>
-#include <mferror.h>
-#include <mfidl.h>
-#include <mfreadwrite.h>
-#include <mftransform.h>
-#include <napi.h>
-#include <tchar.h>
-#include <windows.h>
-#include <chrono>
-#include <iostream>
-#include <thread>
 #include <algorithm>
 #include <cfloat>
-#include <tuple>
+#include <chrono>
 #include <cmath>
-#include <functional>
+#include <thread>
 
 void CaptureDevice::Clear() {
   for (UINT32 i = 0; i < m_cDevices; i++) {
@@ -261,17 +245,9 @@ HRESULT CaptureDevice::ReleaseDevice() {
 
   // Release media source last
   if (m_pSource) {
-    // Try to shutdown the source gracefully
-    IMFMediaSource* pSource = m_pSource;
-    m_pSource = NULL; // Clear pointer first to prevent race conditions
-
-    // Shutdown source
-    HRESULT shutdownHr = pSource->Shutdown();
-    pSource->Release();
-
-    if (FAILED(shutdownHr) && SUCCEEDED(hr)) {
-      hr = shutdownHr;
-    }
+    // Release without shutdown to avoid invalidating the source for reuse
+    m_pSource->Release();
+    m_pSource = NULL;
   }
 
   // Reset capture flag last
@@ -398,8 +374,6 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
   DWORD mftStatus = 0;
   DWORD processOutputStatus = 0;
   IMFSample* pSample = NULL;
-  IMFSample* pOutSample = NULL;
-  IMFMediaBuffer* pBuffer = NULL;
   DWORD streamIndex, flags;
   LONGLONG llTimeStamp = 0, llDuration = 0;
   MFT_OUTPUT_DATA_BUFFER outputDataBuffer = {0};
@@ -518,7 +492,6 @@ HRESULT CaptureDevice::StartCapture(std::function<HRESULT(IMFMediaBuffer*)> call
           outputDataBuffer.pSample = m_pReusableOutSample;
 
           mftResult = m_pTransform->ProcessOutput(0, 1, &outputDataBuffer, &processOutputStatus);
-          // if (FAILED(hr)) break;  // Handle error
 
           if (mftResult == S_OK) {
             // Validate sample before processing
@@ -755,15 +728,11 @@ HRESULT CaptureDevice::SetDesiredFormat(UINT32 desiredWidth, UINT32 desiredHeigh
 
   HRESULT hr = S_OK;
   IMFMediaType* pBestMediaType = NULL;
-  DWORD bestMediaTypeIndex = 0;
 
   // Find the closest matching format
   DWORD mediaTypeIndex = 0;
   IMFMediaType* pMediaType = NULL;
 
-  UINT32 bestWidthDiff = UINT32_MAX;
-  UINT32 bestHeightDiff = UINT32_MAX;
-  UINT32 bestFrameRateDiff = UINT32_MAX;
   double bestScore = DBL_MAX;
 
   while (SUCCEEDED(m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, mediaTypeIndex, &pMediaType))) {
@@ -788,10 +757,6 @@ HRESULT CaptureDevice::SetDesiredFormat(UINT32 desiredWidth, UINT32 desiredHeigh
 
       if (score < bestScore) {
         bestScore = score;
-        bestWidthDiff = widthDiff;
-        bestHeightDiff = heightDiff;
-        bestFrameRateDiff = frameRateDiff;
-        bestMediaTypeIndex = mediaTypeIndex;
         SafeRelease(&pBestMediaType);
         pBestMediaType = pMediaType;
         pBestMediaType->AddRef();

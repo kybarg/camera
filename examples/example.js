@@ -142,48 +142,48 @@ async function takeCameraSnapshot() {
           console.log(`📍 File location: ${filepath}`);
           console.log("");
 
-          // // Stop capture after taking the snapshot
-          // console.log("8️⃣ ⏹️ Stopping capture...");
-          // await camera.stopCapture();
-          // console.log("✅ Capture stopped successfully");
-          // console.log("");
+          // Stop capture after taking the snapshot
+          console.log("8️⃣ ⏹️ Stopping capture...");
+          await camera.stopCapture();
+          console.log("✅ Capture stopped successfully");
+          console.log("");
 
-          // // Open the saved image with default system app
-          // console.log("9️⃣ 🖼️  Opening image with default app...");
-          // const command =
-          //   process.platform === "win32"
-          //     ? `start "" "${filepath}"`
-          //     : process.platform === "darwin"
-          //     ? `open "${filepath}"`
-          //     : `xdg-open "${filepath}"`;
+          // Open the saved image with default system app
+          console.log("9️⃣ 🖼️  Opening image with default app...");
+          const command =
+            process.platform === "win32"
+              ? `start "" "${filepath}"`
+              : process.platform === "darwin"
+              ? `open "${filepath}"`
+              : `xdg-open "${filepath}"`;
 
-          // exec(command, async (error, stdout, stderr) => {
-          //   if (error) {
-          //     console.error(`❌ Error opening image: ${error.message}`);
-          //   } else {
-          //     console.log("✅ Image opened successfully");
-          //   }
+          exec(command, async (error, stdout, stderr) => {
+            if (error) {
+              console.error(`❌ Error opening image: ${error.message}`);
+            } else {
+              console.log("✅ Image opened successfully");
+            }
 
-          //   console.log("");
+            console.log("");
 
-          //   // Release the camera device after image is opened
-          //   console.log("🔟 🔓 Releasing camera device...");
-          //   try {
-          //     await camera.releaseDevice();
-          //     console.log("✅ Camera device released successfully");
-          //   } catch (error) {
-          //     console.error("❌ Error releasing camera device:", error);
-          //   }
-          //   console.log("");
+            // Release the camera device after image is opened
+            console.log("🔟 🔓 Releasing camera device...");
+            try {
+              await camera.releaseDevice();
+              console.log("✅ Camera device released successfully");
+            } catch (error) {
+              console.error("❌ Error releasing camera device:", error);
+            }
+            console.log("");
 
-          //   console.log("✅ Camera snapshot example completed!");
-          //   console.log("🏁 Exiting in 2 seconds...");
+            console.log("✅ Camera snapshot example completed!");
+            console.log("🏁 Exiting in 2 seconds...");
 
-          //   // Exit the process after the image is opened
-          //   setTimeout(() => {
-          //     process.exit(0);
-          //   }, 2000);
-          // });
+            // Exit the process after the image is opened
+            setTimeout(() => {
+              process.exit(0);
+            }, 2000);
+          });
         } catch (error) {
           console.error("❌ Error processing snapshot:", error);
           process.exit(1);
@@ -200,7 +200,6 @@ async function takeCameraSnapshot() {
       console.log("✅ Camera capture started successfully");
       console.log("⏳ Waiting for first frame...");
       console.log("");
-
     } catch (error) {
       console.error("❌ Error starting camera capture:", error);
       throw error;

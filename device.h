@@ -4,10 +4,10 @@
 #include <mfreadwrite.h>
 #include <mftransform.h>
 #include <windows.h>
-#include <string>
-#include <vector>
-#include <tuple>
 #include <functional>
+#include <string>
+#include <tuple>
+#include <vector>
 
 #ifndef CaptureDevice_H
 #define CaptureDevice_H
@@ -18,7 +18,7 @@ struct DeviceInfo {
   std::wstring symbolicLink;
 
   DeviceInfo(const std::wstring& name, const std::wstring& link)
-    : friendlyName(name), symbolicLink(link) {}
+      : friendlyName(name), symbolicLink(link) {}
 };
 
 template <class T>
@@ -33,8 +33,6 @@ class CaptureDevice {
   UINT32 m_cDevices;
   IMFActivate** m_ppDevices;
 
-  bool isCapturing = false;
-
   // Pre-allocated buffers for better performance
   IMFSample* m_pReusableOutSample = NULL;
   IMFMediaBuffer* m_pReusableBuffer = NULL;
@@ -42,6 +40,7 @@ class CaptureDevice {
   bool m_bStreamInfoInitialized = false;
 
  public:
+  bool isCapturing = false;
   IMFTransform* m_pTransform = NULL;
   IMFMediaSource* m_pSource = NULL;
   IMFSourceReader* m_pReader = NULL;
@@ -52,8 +51,8 @@ class CaptureDevice {
       : m_ppDevices(NULL), m_cDevices(0) {
   }
   ~CaptureDevice() {
-    ReleaseDevice(); // Properly release all media resources
-    Clear();         // Clear device enumeration
+    ReleaseDevice();  // Properly release all media resources
+    Clear();          // Clear device enumeration
   }
 
   UINT32 Count() const { return m_cDevices; }
@@ -64,7 +63,9 @@ class CaptureDevice {
   HRESULT SelectDeviceBySymbolicLink(const std::wstring& symbolicLink);
   HRESULT ReleaseDevice();
   HRESULT CreateStream();
+  HRESULT SetupCapture(std::function<HRESULT(IMFMediaBuffer*)> callback);
   HRESULT StartCapture(std::function<HRESULT(IMFMediaBuffer*)> callback);
+  HRESULT RunCaptureLoop(std::function<HRESULT(IMFMediaBuffer*)> callback);
   HRESULT StopCapture();
 
   // New methods for resolution and framerate management

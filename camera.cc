@@ -3,16 +3,7 @@
 #include <thread>
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
-  Napi::Function func = DefineClass(env, "Camera", {
-    InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync),
-    InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync),
-    InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync),
-    InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync),
-    InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync),
-    InstanceMethod("getDimensions", &Camera::GetDimensions),
-    InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync),
-    InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync)
-  });
+  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync)});
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
   *constructor = Napi::Persistent(func);
@@ -37,12 +28,11 @@ Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
 
   // Create thread-safe function for the promise resolution
   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-    env,
-    Napi::Function(),
-    "EnumerateDevicesAsync",
-    0,
-    1
-  );
+      env,
+      Napi::Function(),
+      "EnumerateDevicesAsync",
+      0,
+      1);
 
   // Start async operation
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
@@ -107,12 +97,11 @@ Napi::Value Camera::ClaimDeviceAsync(const Napi::CallbackInfo& info) {
 
   // Create thread-safe function for the promise resolution
   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-    env,
-    Napi::Function(),
-    "ClaimDeviceAsync",
-    0,
-    1
-  );
+      env,
+      Napi::Function(),
+      "ClaimDeviceAsync",
+      0,
+      1);
 
   // Start async operation
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), symbolicLink]() mutable {
@@ -161,12 +150,11 @@ Napi::Value Camera::ReleaseDeviceAsync(const Napi::CallbackInfo& info) {
 
   // Create thread-safe function for the promise resolution
   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-    env,
-    Napi::Function(),
-    "ReleaseDeviceAsync",
-    0,
-    1
-  );
+      env,
+      Napi::Function(),
+      "ReleaseDeviceAsync",
+      0,
+      1);
 
   // Start async operation
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
@@ -214,12 +202,11 @@ Napi::Value Camera::StopCaptureAsync(const Napi::CallbackInfo& info) {
 
   // Create thread-safe function for the promise resolution
   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-    env,
-    Napi::Function(),
-    "StopCaptureAsync",
-    0,
-    1
-  );
+      env,
+      Napi::Function(),
+      "StopCaptureAsync",
+      0,
+      1);
 
   // Start async operation
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
@@ -273,12 +260,11 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
 
   // Create thread-safe function for the promise resolution
   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-    env,
-    Napi::Function(),
-    "GetSupportedFormatsAsync",
-    0,
-    1
-  );
+      env,
+      Napi::Function(),
+      "GetSupportedFormatsAsync",
+      0,
+      1);
 
   // Start async operation
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
@@ -331,12 +317,11 @@ Napi::Value Camera::SetDesiredFormatAsync(const Napi::CallbackInfo& info) {
 
   // Create thread-safe function for the promise resolution
   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-    env,
-    Napi::Function(),
-    "SetDesiredFormatAsync",
-    0,
-    1
-  );
+      env,
+      Napi::Function(),
+      "SetDesiredFormatAsync",
+      0,
+      1);
 
   // Start async operation
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), width, height, frameRate]() mutable {
@@ -381,24 +366,22 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
 
   // Create thread-safe function for the promise resolution
   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-    env,
-    Napi::Function(),
-    "StartCaptureAsync",
-    0,
-    1
-  );
+      env,
+      Napi::Function(),
+      "StartCaptureAsync",
+      0,
+      1);
 
   // Check if frame event emitter function was passed as parameter
   Napi::ThreadSafeFunction tsfnFrame;
   bool hasFrameCallback = false;
   if (info.Length() > 0 && info[0].IsFunction()) {
     tsfnFrame = Napi::ThreadSafeFunction::New(
-      env,
-      info[0].As<Napi::Function>(),
-      "FrameEvent",
-      0,
-      1
-    );
+        env,
+        info[0].As<Napi::Function>(),
+        "FrameEvent",
+        0,
+        1);
     hasFrameCallback = true;
   }
 
@@ -414,7 +397,7 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
       if (SUCCEEDED(hr)) {
         auto frameCallbackLambda = [this, tsfnFrame, hasFrameCallback](IMFMediaBuffer* buf) mutable -> HRESULT {
           if (hasFrameCallback) {
-            buf->AddRef(); // Add reference for the callback
+            buf->AddRef();  // Add reference for the callback
 
             auto callback = [](Napi::Env env, Napi::Function jsCallback, IMFMediaBuffer* buffer) {
               BYTE* bufData = nullptr;
@@ -430,13 +413,12 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
 
                 // Create Node.js buffer with finalizer for automatic cleanup
                 Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::New(
-                  env,
-                  ownedData,
-                  bufLength,
-                  [](Napi::Env env, BYTE* data) {
-                    delete[] data; // Automatic cleanup when Node.js is done with the buffer
-                  }
-                );
+                    env,
+                    ownedData,
+                    bufLength,
+                    [](Napi::Env env, BYTE* data) {
+                      delete[] data;  // Automatic cleanup when Node.js is done with the buffer
+                    });
 
                 // Call the JavaScript frame event emitter with the zero-copy buffer
                 jsCallback.Call({bufferN});
@@ -452,10 +434,10 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
           return S_OK;
         };
 
-        // Start capture - this will block until stopped
-        hr = device.StartCapture(frameCallbackLambda);
+        // Setup capture (non-blocking)
+        hr = device.SetupCapture(frameCallbackLambda);
 
-        // When capture stops (either normally or due to error), resolve the promise
+        // Resolve the promise immediately after setup succeeds
         auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
           if (SUCCEEDED(hr)) {
             Napi::Object result = Napi::Object::New(env);
@@ -471,6 +453,24 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
         };
 
         tsfnPromise.BlockingCall(callback);
+
+        // If setup succeeded, start the blocking capture loop in a separate detached thread
+        if (SUCCEEDED(hr)) {
+          std::thread([this, frameCallbackLambda, tsfnFrame, hasFrameCallback]() mutable {
+            try {
+              // Now run the blocking capture loop
+              device.RunCaptureLoop(frameCallbackLambda);
+            } catch (...) {
+              // Capture loop failed - reset capturing flag
+              device.isCapturing = false;
+            }
+
+            // Clean up frame callback when capture loop ends
+            if (hasFrameCallback) {
+              tsfnFrame.Release();
+            }
+          }).detach();
+        }
 
       } else {
         auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
@@ -491,9 +491,6 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
     }
 
     tsfnPromise.Release();
-    if (hasFrameCallback) {
-      tsfnFrame.Release();
-    }
   }).detach();
 
   return deferred.Promise();

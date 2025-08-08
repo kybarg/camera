@@ -11,6 +11,7 @@ class Camera extends EventEmitter {
     // Bind async methods from native camera
     this.enumerateDevices = this._nativeCamera.enumerateDevicesAsync.bind(this._nativeCamera);
     this.claimDevice = this._nativeCamera.claimDeviceAsync.bind(this._nativeCamera);
+    this.releaseDevice = this._nativeCamera.releaseDeviceAsync.bind(this._nativeCamera);
 
     // Bind other native methods
     this.getSupportedFormats = this._nativeCamera.getSupportedFormatsAsync.bind(this._nativeCamera);

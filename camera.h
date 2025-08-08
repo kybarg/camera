@@ -20,6 +20,7 @@ class Camera : public Napi::ObjectWrap<Camera> {
 
   Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);
   Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);
+  Napi::Value ReleaseDeviceAsync(const Napi::CallbackInfo& info);
   Napi::Value StartCaptureAsync(const Napi::CallbackInfo& info);
   Napi::Value StopCaptureAsync(const Napi::CallbackInfo& info);
   Napi::Value GetDimensions(const Napi::CallbackInfo& info);

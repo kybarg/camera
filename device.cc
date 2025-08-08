@@ -153,6 +153,47 @@ HRESULT CaptureDevice::SelectDeviceBySymbolicLink(const std::wstring& targetSymb
   return hr;
 }
 
+HRESULT CaptureDevice::ReleaseDevice() {
+  HRESULT hr = S_OK;
+
+  // Only stop capture if it's still running and we haven't already stopped it
+  // This prevents double-stopping which can cause issues
+  if (isCapturing) {
+    hr = StopCapture();
+    if (FAILED(hr)) {
+      // If stopping failed, continue with cleanup anyway
+      hr = S_OK;
+    }
+  }
+
+  // Reset dimensions
+  width = 0;
+  height = 0;
+
+  // Release transform
+  if (m_pTransform) {
+    m_pTransform->Release();
+    m_pTransform = NULL;
+  }
+
+  // Release source reader
+  if (m_pReader) {
+    m_pReader->Release();
+    m_pReader = NULL;
+  }
+
+  // Release media source
+  if (m_pSource) {
+    m_pSource->Release();
+    m_pSource = NULL;
+  }
+
+  // Reset stream info initialization flag
+  m_bStreamInfoInitialized = false;
+
+  return hr;
+}
+
 HRESULT CaptureDevice::CreateStream() {
   HRESULT hr = S_OK;
   IMFMediaType *pSrcOutMediaType = NULL, *pMFTInputMediaType = NULL, *pMFTOutputMediaType = NULL;

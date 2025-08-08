@@ -21,6 +21,7 @@ Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
   Napi::Function func = DefineClass(env, "Camera", {
     InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync),
     InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync),
+    InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync),
     InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync),
     InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync),
     InstanceMethod("getDimensions", &Camera::GetDimensions),
@@ -139,6 +140,59 @@ Napi::Value Camera::ClaimDeviceAsync(const Napi::CallbackInfo& info) {
           result.Set("success", Napi::Boolean::New(env, true));
           result.Set("message", Napi::String::New(env, "Device claimed successfully"));
           result.Set("symbolicLink", Napi::String::New(env, reinterpret_cast<const char16_t*>(symbolicLink.c_str())));
+          deferred.Resolve(result);
+        };
+
+        tsfnPromise.BlockingCall(callback);
+      } else {
+        auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
+          _com_error err(hr);
+          LPCTSTR errMsg = err.ErrorMessage();
+          std::string message = errMsg;
+          deferred.Reject(Napi::Error::New(env, message).Value());
+        };
+
+        tsfnPromise.BlockingCall(callback);
+      }
+    } catch (const std::exception& e) {
+      auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
+        deferred.Reject(Napi::Error::New(env, message).Value());
+      };
+
+      tsfnPromise.BlockingCall(callback);
+    }
+
+    tsfnPromise.Release();
+  }).detach();
+
+  return deferred.Promise();
+}
+
+Napi::Value Camera::ReleaseDeviceAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  // Create a promise
+  auto deferred = Napi::Promise::Deferred::New(env);
+
+  // Create thread-safe function for the promise resolution
+  auto tsfnPromise = Napi::ThreadSafeFunction::New(
+    env,
+    Napi::Function(),
+    "ReleaseDeviceAsync",
+    0,
+    1
+  );
+
+  // Start async operation
+  std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
+    try {
+      HRESULT hr = device.ReleaseDevice();
+
+      if (SUCCEEDED(hr)) {
+        auto callback = [deferred = std::move(deferred)](Napi::Env env, Napi::Function) mutable {
+          Napi::Object result = Napi::Object::New(env);
+          result.Set("success", Napi::Boolean::New(env, true));
+          result.Set("message", Napi::String::New(env, "Device released successfully"));
           deferred.Resolve(result);
         };
 
@@ -373,7 +427,7 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
       }
 
       if (SUCCEEDED(hr)) {
-        auto frameCallbackLambda = [this, &tsfnFrame, hasFrameCallback](IMFMediaBuffer* buf) -> HRESULT {
+        auto frameCallbackLambda = [this, tsfnFrame, hasFrameCallback](IMFMediaBuffer* buf) mutable -> HRESULT {
           if (hasFrameCallback) {
             buf->AddRef(); // Add reference for the callback
 
@@ -413,9 +467,10 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
           return S_OK;
         };
 
+        // Start capture - this will block until stopped
         hr = device.StartCapture(frameCallbackLambda);
 
-        // Resolve the promise immediately after starting capture
+        // When capture stops (either normally or due to error), resolve the promise
         auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
           if (SUCCEEDED(hr)) {
             Napi::Object result = Napi::Object::New(env);
@@ -431,6 +486,7 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
         };
 
         tsfnPromise.BlockingCall(callback);
+
       } else {
         auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
           _com_error err(hr);

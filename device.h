@@ -68,6 +68,7 @@ class CaptureDevice {
   HRESULT EnumerateDevices();
   std::vector<DeviceInfo> GetDevicesList();
   HRESULT SelectDeviceBySymbolicLink(const std::wstring& symbolicLink);
+  HRESULT ReleaseDevice();
   HRESULT CreateStream();
   HRESULT StartCapture(std::function<HRESULT(IMFMediaBuffer*)> callback);
   HRESULT StopCapture();

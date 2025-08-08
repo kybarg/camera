@@ -1,13 +1,7 @@
 #ifndef CAMERA_H
 #define CAMERA_H
 
-#include <mfapi.h>
-#include <mferror.h>
-#include <mfidl.h>
-#include <mfreadwrite.h>
-#include <mftransform.h>
 #include <napi.h>
-#include <thread>
 #include "device.h"
 
 class Camera : public Napi::ObjectWrap<Camera> {
@@ -17,14 +11,15 @@ class Camera : public Napi::ObjectWrap<Camera> {
   ~Camera();
 
   CaptureDevice device;
-  Napi::ThreadSafeFunction tsfn;
-  Napi::ThreadSafeFunction tsfnCapturing;
-  std::thread nativeThread;
 
-  Napi::Value EnumerateDevices(const Napi::CallbackInfo& info);
-  Napi::Value SelectDevice(const Napi::CallbackInfo& info);
-  Napi::Value StartCapture(const Napi::CallbackInfo& info);
-  Napi::Value StopCapture(const Napi::CallbackInfo& info);
+  Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);
+  Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);
+  Napi::Value ReleaseDeviceAsync(const Napi::CallbackInfo& info);
+  Napi::Value StartCaptureAsync(const Napi::CallbackInfo& info);
+  Napi::Value StopCaptureAsync(const Napi::CallbackInfo& info);
+  Napi::Value GetDimensions(const Napi::CallbackInfo& info);
+  Napi::Value GetSupportedFormatsAsync(const Napi::CallbackInfo& info);
+  Napi::Value SetDesiredFormatAsync(const Napi::CallbackInfo& info);
 };
 
 #endif

@@ -42,6 +42,9 @@ build/Release
 node_modules/
 jspm_packages/
 
+# Camera snapshots
+snapshots/
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
@@ -131,3 +134,4 @@ dist
 
 # temporary
 build/
+last-camera-symlink.txt

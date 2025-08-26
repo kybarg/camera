@@ -530,22 +530,8 @@ HRESULT CaptureDevice::RunCaptureLoop(std::function<HRESULT(IMFMediaBuffer*)> ca
             if (SUCCEEDED(hr) && pData && cbCurrentLength >= 4) {
               // Validate data size
               const DWORD expectedSize = width * height * 4;
-
-              // Only process and forward full frames. If the buffer contains
-              // less than a full frame, drop it and sleep briefly to reduce
-              // the effective frame rate so the pipeline can catch up on slow machines.
-              if (cbCurrentLength < expectedSize) {
-                // Unlock and drop the undersized buffer
-                buf->Unlock();
-                buf->Release();
-
-                // Brief throttle to avoid busy-waiting and to reduce frame rate
-                std::this_thread::sleep_for(std::chrono::milliseconds(15));
-
-                // Continue capture loop without invoking callback
-                continue;
-              } else {
-                // Full-size buffer: perform conversion in-place (BGRA->RGBA)
+              if (cbCurrentLength >= expectedSize) {
+                // Ultra-fast BGRA to RGBA conversion using optimized bit operations
                 const DWORD pixelCount = cbCurrentLength >> 2;  // Divide by 4 (faster than / 4)
                 DWORD* pixels = reinterpret_cast<DWORD*>(pData);
 
@@ -602,7 +588,7 @@ HRESULT CaptureDevice::RunCaptureLoop(std::function<HRESULT(IMFMediaBuffer*)> ca
               continue;
             }
 
-            // Call the callback with error handling (only full frames reach here)
+            // Call the callback with error handling
             if (buf && isCapturing) {
               HRESULT callbackHr = S_OK;
               try {

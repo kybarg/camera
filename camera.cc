@@ -405,37 +405,26 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
               HRESULT hr = buffer->Lock(&bufData, nullptr, &bufLength);
 
               if (SUCCEEDED(hr)) {
-                // Create a zero-copy Node.js buffer that references the
-                // IMFMediaBuffer memory. We must not Unlock/Release here; we
-                // transfer ownership to the Node.js buffer finalizer which
-                // will Unlock and Release the IMFMediaBuffer when the
-                // JS buffer is garbage-collected.
+                // Create a copy of the buffer data that Node.js will own
+                BYTE* ownedData = new BYTE[bufLength];
+                memcpy(ownedData, bufData, bufLength);
 
-                // Create Node.js buffer with finalizer that unlocks and
-                // releases the IMFMediaBuffer when JS is done with it.
+                buffer->Unlock();
+
+                // Create Node.js buffer with finalizer for automatic cleanup
                 Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::New(
                     env,
-                    bufData,
+                    ownedData,
                     bufLength,
-                    // Finalizer: unlock and release the IMFMediaBuffer
-                    [](Napi::Env /*env*/, BYTE* /*data*/, void* hint) {
-                      IMFMediaBuffer* mfBuf = reinterpret_cast<IMFMediaBuffer*>(hint);
-                      if (mfBuf) {
-                        // Unlock and release the COM buffer
-                        mfBuf->Unlock();
-                        mfBuf->Release();
-                      }
-                    },
-                    // Pass the IMFMediaBuffer pointer as the finalizer hint
-                    reinterpret_cast<void*>(buffer));
+                    [](Napi::Env env, BYTE* data) {
+                      delete[] data;  // Automatic cleanup when Node.js is done with the buffer
+                    });
 
                 // Call the JavaScript frame event emitter with the zero-copy buffer
                 jsCallback.Call({bufferN});
-                // Note: do not release the IMFMediaBuffer here; the finalizer owns it now.
-                return;
               }
 
-              // If lock failed, release the IMFMediaBuffer immediately
+              // Release the IMFMediaBuffer
               buffer->Release();
             };
 

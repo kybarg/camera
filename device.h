@@ -46,6 +46,7 @@ class CaptureDevice {
   IMFSourceReader* m_pReader = NULL;
   UINT32 width = 0;
   UINT32 height = 0;
+  UINT32 stride = 0;
 
   CaptureDevice()
       : m_ppDevices(NULL), m_cDevices(0) {

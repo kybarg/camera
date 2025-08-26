@@ -529,7 +529,8 @@ HRESULT CaptureDevice::RunCaptureLoop(std::function<HRESULT(IMFMediaBuffer*)> ca
             hr = buf->Lock(&pData, &cbMaxLength, &cbCurrentLength);
             if (SUCCEEDED(hr) && pData && cbCurrentLength >= 4) {
               // Validate data size
-              const DWORD expectedSize = width * height * 4;
+              const DWORD effectiveRowBytes = (this->stride > 0) ? this->stride : (width * 4);
+              const DWORD expectedSize = effectiveRowBytes * height;
               if (cbCurrentLength >= expectedSize) {
                 // Ultra-fast BGRA to RGBA conversion using optimized bit operations
                 const DWORD pixelCount = cbCurrentLength >> 2;  // Divide by 4 (faster than / 4)

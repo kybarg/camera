@@ -295,24 +295,6 @@ HRESULT CaptureDevice::CreateStream() {
     hr = S_OK;  // Don't fail on dimension issues
   }
 
-  // Determine stride (bytes per row). Prefer the media type's default stride
-  // if available; otherwise calculate or fall back to width*4.
-  {
-    UINT32 defaultStride = 0;
-    HRESULT strideHr = pSrcOutMediaType->GetUINT32(MF_MT_DEFAULT_STRIDE, &defaultStride);
-    if (SUCCEEDED(strideHr) && defaultStride != 0) {
-      stride = defaultStride;
-    } else {
-      // Try to calculate image size for RGB32 and derive stride
-      UINT32 imageSize = 0;
-      if (SUCCEEDED(MFCalculateImageSize(MFVideoFormat_RGB32, width, height, &imageSize)) && height > 0) {
-        stride = static_cast<UINT32>(imageSize / height);
-      } else {
-        stride = width * 4;
-      }
-    }
-  }
-
   // Verify color converter is available
   hr = CoCreateInstance(CLSID_CColorConvertDMO, NULL, CLSCTX_INPROC_SERVER, IID_IUnknown, (void**)&colorConvTransformUnk);
   if (FAILED(hr)) {
@@ -533,18 +515,7 @@ HRESULT CaptureDevice::RunCaptureLoop(std::function<HRESULT(IMFMediaBuffer*)> ca
           }
 
           IMFMediaBuffer* buf = nullptr;
-          // Prefer getting the buffer directly from the sample to reuse the
-          // pre-allocated memory (m_pReusableBuffer). Only fall back to
-          // ConvertToContiguousBuffer when the sample contains multiple
-          // buffers or GetBufferByIndex isn't available/succeeds.
-          DWORD bufferCount = 0;
-          HRESULT countHr = outputDataBuffer.pSample->GetBufferCount(&bufferCount);
-          if (SUCCEEDED(countHr) && bufferCount == 1) {
-            hr = outputDataBuffer.pSample->GetBufferByIndex(0, &buf);
-          } else {
-            hr = outputDataBuffer.pSample->ConvertToContiguousBuffer(&buf);
-          }
-
+          hr = outputDataBuffer.pSample->ConvertToContiguousBuffer(&buf);
           if (FAILED(hr) || !buf) {
             if (buf) SafeRelease(&buf);
             continue;  // Skip this frame but continue
@@ -557,10 +528,8 @@ HRESULT CaptureDevice::RunCaptureLoop(std::function<HRESULT(IMFMediaBuffer*)> ca
 
             hr = buf->Lock(&pData, &cbMaxLength, &cbCurrentLength);
             if (SUCCEEDED(hr) && pData && cbCurrentLength >= 4) {
-              // Validate data size using stride (bytes per row) when available
-              const DWORD bytesPerPixel = 4;
-              const DWORD effectiveRowBytes = (stride > 0) ? stride : (width * bytesPerPixel);
-              const DWORD expectedSize = effectiveRowBytes * height;
+              // Validate data size
+              const DWORD expectedSize = width * height * 4;
 
               // Only process and forward full frames. If the buffer contains
               // less than a full frame, drop it and sleep briefly to reduce
@@ -576,89 +545,48 @@ HRESULT CaptureDevice::RunCaptureLoop(std::function<HRESULT(IMFMediaBuffer*)> ca
                 // Continue capture loop without invoking callback
                 continue;
               } else {
-                // Full-size buffer: optimized conversion paths.
-                // Path A: tightly-packed (no stride padding) — operate on DWORDs with unrolling.
-                // Path B: stride != width*4 — process row-by-row using DWORD ops to stay fast.
-                const DWORD packedRowBytes = width * bytesPerPixel;
+                // Full-size buffer: perform conversion in-place (BGRA->RGBA)
+                const DWORD pixelCount = cbCurrentLength >> 2;  // Divide by 4 (faster than / 4)
+                DWORD* pixels = reinterpret_cast<DWORD*>(pData);
 
-                if (effectiveRowBytes == packedRowBytes) {
-                  // Packed: convert whole buffer as contiguous DWORD pixels
-                  DWORD* pixels = reinterpret_cast<DWORD*>(pData);
-                  const DWORD pixelCount = cbCurrentLength >> 2;
+                // Constants for bit manipulation
+                constexpr DWORD ALPHA_MASK = 0xFF000000;  // Alpha = 255
+                constexpr DWORD GREEN_MASK = 0x0000FF00;  // Green unchanged
 
-                  constexpr DWORD ALPHA_MASK = 0xFF000000;
-                  constexpr DWORD GREEN_MASK = 0x0000FF00;
+                // Optimized loop with better cache efficiency and bounds checking
+                const DWORD maxExpectedPixels = expectedSize >> 2;
+                const DWORD safePixelCount = (pixelCount < maxExpectedPixels) ? pixelCount : maxExpectedPixels;
+                const DWORD remainder = safePixelCount & 7;  // safePixelCount % 8
+                const DWORD vectorPixels = safePixelCount - remainder;
 
-                  const DWORD maxExpectedPixels = (expectedSize >> 2);
-                  const DWORD safePixelCount = (pixelCount < maxExpectedPixels) ? pixelCount : maxExpectedPixels;
-                  const DWORD remainder = safePixelCount & 7;
-                  const DWORD vectorPixels = safePixelCount - remainder;
+                // Main vectorized loop - 8 pixels per iteration
+                for (DWORD i = 0; i < vectorPixels; i += 8) {
+                  // Unroll 8 pixels for maximum throughput
+                  DWORD p0 = pixels[i];
+                  DWORD p1 = pixels[i + 1];
+                  DWORD p2 = pixels[i + 2];
+                  DWORD p3 = pixels[i + 3];
+                  DWORD p4 = pixels[i + 4];
+                  DWORD p5 = pixels[i + 5];
+                  DWORD p6 = pixels[i + 6];
+                  DWORD p7 = pixels[i + 7];
 
-                  // Unrolled loop for throughput
-                  for (DWORD i = 0; i < vectorPixels; i += 8) {
-                    DWORD p0 = pixels[i];
-                    DWORD p1 = pixels[i + 1];
-                    DWORD p2 = pixels[i + 2];
-                    DWORD p3 = pixels[i + 3];
-                    DWORD p4 = pixels[i + 4];
-                    DWORD p5 = pixels[i + 5];
-                    DWORD p6 = pixels[i + 6];
-                    DWORD p7 = pixels[i + 7];
+                  // BGRA -> RGBA: Swap R&B, keep G, set A=255
+                  pixels[i] = ALPHA_MASK | (p0 & GREEN_MASK) | ((p0 & 0xFF) << 16) | ((p0 >> 16) & 0xFF);
+                  pixels[i + 1] = ALPHA_MASK | (p1 & GREEN_MASK) | ((p1 & 0xFF) << 16) | ((p1 >> 16) & 0xFF);
+                  pixels[i + 2] = ALPHA_MASK | (p2 & GREEN_MASK) | ((p2 & 0xFF) << 16) | ((p2 >> 16) & 0xFF);
+                  pixels[i + 3] = ALPHA_MASK | (p3 & GREEN_MASK) | ((p3 & 0xFF) << 16) | ((p3 >> 16) & 0xFF);
+                  pixels[i + 4] = ALPHA_MASK | (p4 & GREEN_MASK) | ((p4 & 0xFF) << 16) | ((p4 >> 16) & 0xFF);
+                  pixels[i + 5] = ALPHA_MASK | (p5 & GREEN_MASK) | ((p5 & 0xFF) << 16) | ((p5 >> 16) & 0xFF);
+                  pixels[i + 6] = ALPHA_MASK | (p6 & GREEN_MASK) | ((p6 & 0xFF) << 16) | ((p6 >> 16) & 0xFF);
+                  pixels[i + 7] = ALPHA_MASK | (p7 & GREEN_MASK) | ((p7 & 0xFF) << 16) | ((p7 >> 16) & 0xFF);
+                }
 
-                    pixels[i] = ALPHA_MASK | (p0 & GREEN_MASK) | ((p0 & 0xFF) << 16) | ((p0 >> 16) & 0xFF);
-                    pixels[i + 1] = ALPHA_MASK | (p1 & GREEN_MASK) | ((p1 & 0xFF) << 16) | ((p1 >> 16) & 0xFF);
-                    pixels[i + 2] = ALPHA_MASK | (p2 & GREEN_MASK) | ((p2 & 0xFF) << 16) | ((p2 >> 16) & 0xFF);
-                    pixels[i + 3] = ALPHA_MASK | (p3 & GREEN_MASK) | ((p3 & 0xFF) << 16) | ((p3 >> 16) & 0xFF);
-                    pixels[i + 4] = ALPHA_MASK | (p4 & GREEN_MASK) | ((p4 & 0xFF) << 16) | ((p4 >> 16) & 0xFF);
-                    pixels[i + 5] = ALPHA_MASK | (p5 & GREEN_MASK) | ((p5 & 0xFF) << 16) | ((p5 >> 16) & 0xFF);
-                    pixels[i + 6] = ALPHA_MASK | (p6 & GREEN_MASK) | ((p6 & 0xFF) << 16) | ((p6 >> 16) & 0xFF);
-                    pixels[i + 7] = ALPHA_MASK | (p7 & GREEN_MASK) | ((p7 & 0xFF) << 16) | ((p7 >> 16) & 0xFF);
-                  }
-
-                  // Tail
-                  for (DWORD i = vectorPixels; i < safePixelCount; ++i) {
-                    const DWORD pixel = pixels[i];
-                    pixels[i] = ALPHA_MASK | (pixel & GREEN_MASK) | ((pixel & 0xFF) << 16) | ((pixel >> 16) & 0xFF);
-                  }
-                } else {
-                  // Strided rows: process each row using DWORD ops for speed
-                  constexpr DWORD ALPHA_MASK = 0xFF000000;
-                  constexpr DWORD GREEN_MASK = 0x0000FF00;
-
-                  for (UINT32 y = 0; y < height; ++y) {
-                    BYTE* rowPtr = pData + (static_cast<size_t>(y) * effectiveRowBytes);
-                    DWORD* rowPixels = reinterpret_cast<DWORD*>(rowPtr);
-
-                    UINT32 remaining = width;
-                    DWORD i = 0;
-
-                    const DWORD vectorEnd = (width & ~7u);
-                    for (; i < vectorEnd; i += 8) {
-                      DWORD p0 = rowPixels[i];
-                      DWORD p1 = rowPixels[i + 1];
-                      DWORD p2 = rowPixels[i + 2];
-                      DWORD p3 = rowPixels[i + 3];
-                      DWORD p4 = rowPixels[i + 4];
-                      DWORD p5 = rowPixels[i + 5];
-                      DWORD p6 = rowPixels[i + 6];
-                      DWORD p7 = rowPixels[i + 7];
-
-                      rowPixels[i] = ALPHA_MASK | (p0 & GREEN_MASK) | ((p0 & 0xFF) << 16) | ((p0 >> 16) & 0xFF);
-                      rowPixels[i + 1] = ALPHA_MASK | (p1 & GREEN_MASK) | ((p1 & 0xFF) << 16) | ((p1 >> 16) & 0xFF);
-                      rowPixels[i + 2] = ALPHA_MASK | (p2 & GREEN_MASK) | ((p2 & 0xFF) << 16) | ((p2 >> 16) & 0xFF);
-                      rowPixels[i + 3] = ALPHA_MASK | (p3 & GREEN_MASK) | ((p3 & 0xFF) << 16) | ((p3 >> 16) & 0xFF);
-                      rowPixels[i + 4] = ALPHA_MASK | (p4 & GREEN_MASK) | ((p4 & 0xFF) << 16) | ((p4 >> 16) & 0xFF);
-                      rowPixels[i + 5] = ALPHA_MASK | (p5 & GREEN_MASK) | ((p5 & 0xFF) << 16) | ((p5 >> 16) & 0xFF);
-                      rowPixels[i + 6] = ALPHA_MASK | (p6 & GREEN_MASK) | ((p6 & 0xFF) << 16) | ((p6 >> 16) & 0xFF);
-                      rowPixels[i + 7] = ALPHA_MASK | (p7 & GREEN_MASK) | ((p7 & 0xFF) << 16) | ((p7 >> 16) & 0xFF);
-                    }
-
-                    // Tail pixels
-                    for (; i < width; ++i) {
-                      const DWORD pixel = rowPixels[i];
-                      rowPixels[i] = ALPHA_MASK | (pixel & GREEN_MASK) | ((pixel & 0xFF) << 16) | ((pixel >> 16) & 0xFF);
-                    }
-                  }
+                // Handle remaining pixels (0-7 pixels)
+                for (DWORD i = vectorPixels; i < safePixelCount; ++i) {
+                  const DWORD pixel = pixels[i];
+                  pixels[i] = ALPHA_MASK | (pixel & GREEN_MASK) |
+                              ((pixel & 0xFF) << 16) | ((pixel >> 16) & 0xFF);
                 }
               }
 

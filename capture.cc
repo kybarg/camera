@@ -29,6 +29,8 @@
 // Use SDK QISearch implementation (link to SDK libs via binding.gyp)
 
 HRESULT CopyAttribute(IMFAttributes* pSrc, IMFAttributes* pDest, const GUID& key);
+// Forward declaration for helper used to deliver samples to frame callback
+static HRESULT DeliverSampleToCallback(IMFSample* pSample, std::function<void(std::vector<uint8_t>&&)>& callback);
 
 void DeviceList::Clear() {
   for (UINT32 i = 0; i < m_cDevices; i++) {
@@ -286,11 +288,17 @@ HRESULT CCapture::OnReadSample(
     if (FAILED(hr)) {
       goto done;
     }
-
-    hr = m_pWriter->WriteSample(0, pSample);
-
-    if (FAILED(hr)) {
-      goto done;
+    if (m_pWriter) {
+      hr = m_pWriter->WriteSample(0, pSample);
+      if (FAILED(hr)) {
+        goto done;
+      }
+    } else if (m_frameCallback) {
+      // Deliver sample to the registered frame callback (non-fatal if delivery fails)
+      HRESULT hrDel = DeliverSampleToCallback(pSample, m_frameCallback);
+      if (FAILED(hrDel)) {
+        // don't fail the capture for callback delivery errors
+      }
     }
   }
 
@@ -357,37 +365,81 @@ HRESULT CCapture::StartCapture(
 
   EnterCriticalSection(&m_critsec);
 
-  // Create the media source for the device.
-  hr = pActivate->ActivateObject(
-      __uuidof(IMFMediaSource),
-      (void**)&pSource);
+  // If we don't already have a source reader, create the media source
+  // and open it. InitFromActivate may have already created m_pReader
+  // so avoid re-activating/opening which can cause the media source to
+  // report that an event generator already has a listener.
+  if (m_pReader == NULL) {
+    // Create the media source for the device.
+    hr = pActivate->ActivateObject(
+        __uuidof(IMFMediaSource),
+        (void**)&pSource);
 
-  // Get the symbolic link. This is needed to handle device-
-  // loss notifications. (See CheckDeviceLost.)
+    // Get the symbolic link. This is needed to handle device-
+    // loss notifications. (See CheckDeviceLost.)
+    if (SUCCEEDED(hr)) {
+      hr = pActivate->GetAllocatedString(
+          MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
+          &m_pwszSymbolicLink,
+          NULL);
+    }
 
-  if (SUCCEEDED(hr)) {
-    hr = pActivate->GetAllocatedString(
-        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
-        &m_pwszSymbolicLink,
-        NULL);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = OpenMediaSource(pSource);
+    if (SUCCEEDED(hr)) {
+      hr = OpenMediaSource(pSource);
+    }
+  } else {
+    // We already initialized the source reader in InitFromActivate.
+    // Ensure we have a symbolic link recorded for device loss handling.
+    if (m_pwszSymbolicLink == NULL) {
+      HRESULT hrSym = pActivate->GetAllocatedString(
+          MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
+          &m_pwszSymbolicLink,
+          NULL);
+      if (FAILED(hrSym)) {
+        // Non-fatal: continue with existing reader if symbolic link cannot be obtained.
+      }
+    }
   }
 
   // Create the sink writer
   if (SUCCEEDED(hr)) {
-    hr = MFCreateSinkWriterFromURL(
-        pwszFileName,
-        NULL,
-        NULL,
-        &m_pWriter);
+    if (pwszFileName) {
+      hr = MFCreateSinkWriterFromURL(
+          pwszFileName,
+          NULL,
+          NULL,
+          &m_pWriter);
+    } else {
+      m_pWriter = NULL;
+    }
   }
 
-  // Set up the encoding parameters.
+  // Set up the encoding parameters. Only configure the sink writer when
+  // we actually have a writer. When no writer is present (frame-callback
+  // mode), request RGB32 output from the source reader so the sample
+  // buffers are uncompressed and usable by the embedding (JS).
   if (SUCCEEDED(hr)) {
-    hr = ConfigureCapture(param);
+    if (m_pWriter) {
+      hr = ConfigureCapture(param);
+    } else {
+      // Attempt to set the reader output subtype to RGB32. This requests
+      // the source reader to perform color conversion if required.
+      IMFMediaType* pCurrent = NULL;
+      hr = m_pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrent);
+      if (SUCCEEDED(hr) && pCurrent) {
+        // Try to set subtype to RGB32 for delivered samples
+        hr = pCurrent->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+        if (SUCCEEDED(hr)) {
+          hr = m_pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pCurrent);
+        }
+      }
+      SafeRelease(&pCurrent);
+      // Non-fatal: if the reader cannot provide RGB32, continue and let
+      // the callback handle whatever format is produced.
+      if (FAILED(hr)) {
+        hr = S_OK;
+      }
+    }
   }
 
   if (SUCCEEDED(hr)) {
@@ -407,6 +459,27 @@ HRESULT CCapture::StartCapture(
 
   SafeRelease(&pSource);
   LeaveCriticalSection(&m_critsec);
+  return hr;
+}
+
+// Helper to extract contiguous buffer from an IMFSample and call the frame callback
+static HRESULT DeliverSampleToCallback(IMFSample* pSample, std::function<void(std::vector<uint8_t>&&)>& callback) {
+  if (!pSample || !callback) return E_POINTER;
+
+  IMFMediaBuffer* pBuffer = NULL;
+  HRESULT hr = pSample->ConvertToContiguousBuffer(&pBuffer);
+  if (FAILED(hr)) return hr;
+
+  BYTE* pData = NULL;
+  DWORD maxLen = 0, curLen = 0;
+  hr = pBuffer->Lock(&pData, &maxLen, &curLen);
+  if (SUCCEEDED(hr)) {
+    std::vector<uint8_t> vec(pData, pData + curLen);
+    callback(std::move(vec));
+    pBuffer->Unlock();
+  }
+
+  SafeRelease(&pBuffer);
   return hr;
 }
 
@@ -453,7 +526,8 @@ HRESULT CCapture::EndCaptureSession() {
 BOOL CCapture::IsCapturing() {
   EnterCriticalSection(&m_critsec);
 
-  BOOL bIsCapturing = (m_pWriter != NULL);
+  // Consider us capturing if we have a writer OR a registered frame callback.
+  BOOL bIsCapturing = (m_pWriter != NULL) || (m_frameCallback != nullptr);
 
   LeaveCriticalSection(&m_critsec);
 

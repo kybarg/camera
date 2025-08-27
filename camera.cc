@@ -10,7 +10,7 @@
 #include <objbase.h>
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
-  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("getDimensions", &Camera::GetDimensions)});
+  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("startCapture", &Camera::StartCaptureAsync), InstanceMethod("stopCapture", &Camera::StopCaptureAsync)});
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
   *constructor = Napi::Persistent(func);
@@ -633,157 +633,78 @@ Napi::Value Camera::GetDimensions(const Napi::CallbackInfo& info) {
 //   return deferred.Promise();
 // }
 
-// Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
-//   Napi::Env env = info.Env();
+Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
 
-//   // Create a promise
-//   auto deferred = Napi::Promise::Deferred::New(env);
+  if (!this->device) {
+    Napi::TypeError::New(env, "Device not initialized").ThrowAsJavaScriptException();
+    return env.Null();
+  }
 
-//   // Create thread-safe function for the promise resolution
-//   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-//       env,
-//       Napi::Function(),
-//       "StartCaptureAsync",
-//       0,
-//       1);
+  auto deferred = Napi::Promise::Deferred::New(env);
 
-//   // Check if frame event emitter function was passed as parameter
-//   Napi::ThreadSafeFunction tsfnFrame;
-//   bool hasFrameCallback = false;
-//   if (info.Length() > 0 && info[0].IsFunction()) {
-//     tsfnFrame = Napi::ThreadSafeFunction::New(
-//         env,
-//         info[0].As<Napi::Function>(),
-//         "FrameEvent",
-//         0,
-//         1);
-//     hasFrameCallback = true;
-//   }
+  // Expect a JS function to receive frames as first arg (optional)
+  if (info.Length() > 0 && info[0].IsFunction()) {
+    // Store the TSFN on the Camera instance for lifecycle management
+    this->frameTsfn = Napi::ThreadSafeFunction::New(env, info[0].As<Napi::Function>(), "FrameCallback", 0, 1);
+  } else {
+    // Create a no-op TSFN stored on the Camera instance
+    this->frameTsfn = Napi::ThreadSafeFunction::New(env, Napi::Function::New(env, [](const Napi::CallbackInfo&) {}), "FrameCallback", 0, 1);
+  }
 
-//   // Start async capture operation
-//   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), tsfnFrame = std::move(tsfnFrame), hasFrameCallback]() mutable {
-//     try {
-//       HRESULT hr = S_OK;
+  // Register CCapture frame callback which forwards buffers via the stored TSFN
+  Napi::ThreadSafeFunction tsfnLocal = this->frameTsfn;
+  this->device->SetFrameCallback([tsfnLocal](std::vector<uint8_t>&& buf) mutable {
+    // Move vector into heap and pass pointer to TSFN
+    std::vector<uint8_t>* heapBuf = new std::vector<uint8_t>(std::move(buf));
+    auto cb = [](Napi::Env env, Napi::Function jsCallback, std::vector<uint8_t>* data) {
+      Napi::Buffer<uint8_t> nodeBuf = Napi::Buffer<uint8_t>::Copy(env, data->data(), data->size());
+      jsCallback.Call({nodeBuf});
+      delete data;
+    };
+    // Use non-blocking call to avoid deadlocks
+    tsfnLocal.NonBlockingCall(heapBuf, cb);
+  });
 
-//       if (device.m_pTransform == NULL) {
-//         hr = device.CreateStream();
-//       }
+  // Start capture without file; frames will be delivered via callback
+  EncodingParameters params = {0, 0};
+  HRESULT hr = this->device->StartCapture(this->claimedActivate, NULL, params);
+  if (FAILED(hr)) {
+    // cleanup TSFN
+    if (this->frameTsfn) {
+      this->frameTsfn.Release();
+      this->frameTsfn = Napi::ThreadSafeFunction();
+    }
+    deferred.Reject(Napi::Error::New(env, HResultToString(hr)).Value());
+    return deferred.Promise();
+  }
 
-//       if (SUCCEEDED(hr)) {
-//         auto frameCallbackLambda = [this, tsfnFrame, hasFrameCallback](IMFMediaBuffer* buf) mutable -> HRESULT {
-//           if (!hasFrameCallback) {
-//             return S_OK;
-//           }
+  this->isCapturing = true;
+  deferred.Resolve(Napi::Boolean::New(env, true));
+  return deferred.Promise();
+}
 
-//           // Take an extra reference for passing the buffer to the JS thread
-//           buf->AddRef();
+Napi::Value Camera::StopCaptureAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  auto deferred = Napi::Promise::Deferred::New(env);
 
-//           // JS-side callback that will lock/unlock and release the IMFMediaBuffer
-//           auto callback = [](Napi::Env env, Napi::Function jsCallback, IMFMediaBuffer* buffer) {
-//             BYTE* bufData = nullptr;
-//             DWORD bufLength = 0;
-//             HRESULT hrLock = buffer->Lock(&bufData, nullptr, &bufLength);
-//             bool locked = SUCCEEDED(hrLock);
+  if (!this->device) {
+    deferred.Reject(Napi::Error::New(env, "Device not initialized").Value());
+    return deferred.Promise();
+  }
 
-//             if (locked && bufLength > 0) {
-//               // Copy the buffer data; Node owns the copy
-//               BYTE* ownedData = new BYTE[bufLength];
-//               memcpy(ownedData, bufData, bufLength);
+  HRESULT hr = this->device->EndCaptureSession();
+  if (FAILED(hr)) {
+    deferred.Reject(Napi::Error::New(env, HResultToString(hr)).Value());
+  } else {
+    this->isCapturing = false;
+    // If a TSFN was set up, release it
+    if (this->frameTsfn) {
+      this->frameTsfn.Release();
+      this->frameTsfn = Napi::ThreadSafeFunction();
+    }
+    deferred.Resolve(Napi::Boolean::New(env, true));
+  }
 
-//               // Unlock after reading
-//               buffer->Unlock();
-
-//               // Create Node.js buffer with finalizer for automatic cleanup
-//               Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::New(
-//                   env,
-//                   ownedData,
-//                   bufLength,
-//                   [](Napi::Env /*env*/, BYTE* data) {
-//                     delete[] data;
-//                   });
-
-//               // Call the JavaScript frame event emitter
-//               jsCallback.Call({bufferN});
-//             } else if (locked) {
-//               // Nothing to send, just unlock
-//               buffer->Unlock();
-//             }
-
-//             // Release the IMFMediaBuffer reference taken by the producer
-//             buffer->Release();
-//           };
-
-//           // Try to queue the buffer to JS without blocking; drop if queue is full
-//           napi_status status = tsfnFrame.NonBlockingCall(buf, callback);
-
-//           if (status == napi_ok) {
-//             return S_OK;
-//           }
-
-//           // If the queue is full or another error occurred, drop the frame and release our ref
-//           buf->Release();
-//           // Treat dropped frames as non-fatal for the capture pipeline
-//           return S_OK;
-//         };
-
-//         // Setup capture (non-blocking)
-//         hr = device.SetupCapture(frameCallbackLambda);
-
-//         // Resolve the promise immediately after setup succeeds
-//         auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
-//           if (SUCCEEDED(hr)) {
-//             Napi::Object result = Napi::Object::New(env);
-//             result.Set("success", Napi::Boolean::New(env, true));
-//             result.Set("message", Napi::String::New(env, "Capture started successfully"));
-//             deferred.Resolve(result);
-//           } else {
-//             _com_error err(hr);
-//             LPCTSTR errMsg = err.ErrorMessage();
-//             std::string message = errMsg;
-//             deferred.Reject(Napi::Error::New(env, message).Value());
-//           }
-//         };
-
-//         tsfnPromise.BlockingCall(callback);
-
-//         // If setup succeeded, start the blocking capture loop in a separate detached thread
-//         if (SUCCEEDED(hr)) {
-//           std::thread([this, frameCallbackLambda, tsfnFrame, hasFrameCallback]() mutable {
-//             try {
-//               // Now run the blocking capture loop
-//               device.RunCaptureLoop(frameCallbackLambda);
-//             } catch (...) {
-//               // Capture loop failed - reset capturing flag
-//               device.isCapturing = false;
-//             }
-
-//             // Clean up frame callback when capture loop ends
-//             if (hasFrameCallback) {
-//               tsfnFrame.Release();
-//             }
-//           }).detach();
-//         }
-
-//       } else {
-//         auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
-//           _com_error err(hr);
-//           LPCTSTR errMsg = err.ErrorMessage();
-//           std::string message = errMsg;
-//           deferred.Reject(Napi::Error::New(env, message).Value());
-//         };
-
-//         tsfnPromise.BlockingCall(callback);
-//       }
-//     } catch (const std::exception& e) {
-//       auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
-//         deferred.Reject(Napi::Error::New(env, message).Value());
-//       };
-
-//       tsfnPromise.BlockingCall(callback);
-//     }
-
-//     tsfnPromise.Release();
-//   }).detach();
-
-//   return deferred.Promise();
-// }
+  return deferred.Promise();
+}

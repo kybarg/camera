@@ -13,11 +13,11 @@
 
 #pragma once
 
+#include <windows.h>
 #include <Dbt.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
-#include <windows.h>
 
 const UINT WM_APP_PREVIEW_ERROR = WM_APP + 1;  // wparam = HRESULT
 
@@ -38,6 +38,9 @@ class DeviceList {
   HRESULT EnumerateDevices();
   HRESULT GetDevice(UINT32 index, IMFActivate** ppActivate);
   HRESULT GetDeviceName(UINT32 index, WCHAR** ppszName);
+  HRESULT GetDeviceSymbolicLink(UINT32 index, WCHAR** ppszSymLink);
+  // Helper that returns both friendly name and symbolic link (allocated via CoTaskMemAlloc).
+  HRESULT GetDeviceInfo(UINT32 index, WCHAR** ppszName, WCHAR** ppszSymLink);
 };
 
 struct EncodingParameters {

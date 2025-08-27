@@ -21,6 +21,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <tuple>
 
 const UINT WM_APP_PREVIEW_ERROR = WM_APP + 1;  // wparam = HRESULT
 
@@ -83,6 +84,10 @@ class CCapture : public IMFSourceReaderCallback {
   HRESULT EndCaptureSession();
   BOOL IsCapturing();
   HRESULT CheckDeviceLost(DEV_BROADCAST_HDR* pHdr, BOOL* pbDeviceLost);
+  // Enumerate supported native media types from the active source reader (if any).
+  HRESULT GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, UINT32, std::string>>& outFormats);
+  // Enumerate supported formats by activating an IMFActivate and creating a temporary reader.
+  static HRESULT EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vector<std::tuple<UINT32, UINT32, UINT32, std::string>>& outFormats);
 
  protected:
   enum State {

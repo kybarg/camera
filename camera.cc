@@ -2,10 +2,16 @@
 #include <comdef.h>
 #include <windows.h>
 #include <thread>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+#include <vector>
+#include <tuple>
+#include <objbase.h>
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
   Napi::Function func = DefineClass(env, "Camera", {
-                                                       InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync)
+                                                       InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync)
                                                        //, InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync)
                                                    });
 
@@ -137,38 +143,11 @@ Napi::Value Camera::ClaimDeviceAsync(const Napi::CallbackInfo& info) {
     hr = list.GetDevice(identifier.c_str(), &pActivate);
 
     if (SUCCEEDED(hr) && pActivate) {
-      // Create CCapture instance and start capture to NUL (no file) to claim device
-      CCapture* pCapture = nullptr;
-      hr = CCapture::CreateInstance(NULL, &pCapture);
-      if (SUCCEEDED(hr) && pCapture) {
-        EncodingParameters params = {MFVideoFormat_NV12, 1000000};
-        // Create a temporary file path for the sink writer. Using "nul"
-        // can cause parameter errors for MFCreateSinkWriterFromURL.
-        WCHAR tmpPath[MAX_PATH];
-        WCHAR tmpFile[MAX_PATH];
-        DWORD len = GetTempPathW(MAX_PATH, tmpPath);
-        if (len > 0 && len < MAX_PATH) {
-          // Create a unique filename with .wmv extension which MF sink writer
-          // usually recognizes.
-          unsigned long long ticks = GetTickCount64();
-          std::wstring base(tmpPath);
-          if (!base.empty() && base.back() != L'\\' && base.back() != L'/') base.push_back(L'\\');
-          swprintf_s(tmpFile, MAX_PATH, L"%scamera_claim_%llu.wmv", base.c_str(), ticks);
-          // Store the temp file path to delete later
-          this->claimedTempFile = tmpFile;
-          hr = pCapture->StartCapture(pActivate, tmpFile, params);
-        } else {
-          hr = E_FAIL;
-        }
-        if (SUCCEEDED(hr)) {
-          // store the claimed activation so other calls can release later
-          this->claimedActivate = pActivate;
-          // also keep device instance pointer
-          this->device = pCapture;
-        } else {
-          pCapture->Release();
-        }
-      }
+      // Simply assign the claimed activation. Do NOT start capture here.
+      // GetDevice returns an AddRef'd IMFActivate so we can store it directly.
+      this->claimedActivate = pActivate;
+      // Do not create or start a CCapture instance here — the caller can
+      // decide when to start capture using the claimed activation.
     }
 
     if (pActivate) {
@@ -212,6 +191,96 @@ Napi::Value Camera::ClaimDeviceAsync(const Napi::CallbackInfo& info) {
         char header[64];
         sprintf_s(header, sizeof(header), "HRESULT=0x%08X: ", (unsigned)hr);
         std::string message = std::string(header) + messageBody;
+        deferred.Reject(Napi::Error::New(env, message).Value());
+      };
+      tsfnPromise.BlockingCall(callback);
+    }
+
+    tsfnPromise.Release();
+  }).detach();
+
+  return deferred.Promise();
+}
+
+// Helper: convert HRESULT to string
+static std::string HResultToString(HRESULT hr) {
+  _com_error err(hr);
+  LPCTSTR errMsg = err.ErrorMessage();
+  std::string messageBody;
+#ifdef UNICODE
+  if (errMsg) {
+    int len = WideCharToMultiByte(CP_UTF8, 0, errMsg, -1, NULL, 0, NULL, NULL);
+    if (len > 0) {
+      std::string tmp(len, '\0');
+      WideCharToMultiByte(CP_UTF8, 0, errMsg, -1, &tmp[0], len, NULL, NULL);
+      if (!tmp.empty() && tmp.back() == '\0') tmp.pop_back();
+      messageBody = tmp;
+    }
+  }
+#else
+  if (errMsg) messageBody = errMsg;
+#endif
+  char header[64];
+  sprintf_s(header, sizeof(header), "HRESULT=0x%08X: ", (unsigned)hr);
+  return std::string(header) + messageBody;
+}
+
+Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  auto deferred = Napi::Promise::Deferred::New(env);
+
+  auto tsfnPromise = Napi::ThreadSafeFunction::New(
+      env,
+      Napi::Function(),
+      "GetSupportedFormatsAsync",
+      0,
+      1);
+
+  std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
+    try {
+      std::vector<std::tuple<UINT32, UINT32, UINT32, std::string>> formats;
+      HRESULT hr = S_OK;
+
+      if (this->device != nullptr) {
+        hr = this->device->GetSupportedFormats(formats);
+      } else if (this->claimedActivate != nullptr) {
+        hr = CCapture::EnumerateFormatsFromActivate(this->claimedActivate, formats);
+      } else {
+        auto callback = [deferred = std::move(deferred)](Napi::Env env, Napi::Function) mutable {
+          deferred.Reject(Napi::Error::New(env, "No active capture device and no claimed device to enumerate formats from").Value());
+        };
+        tsfnPromise.BlockingCall(callback);
+        tsfnPromise.Release();
+        return;
+      }
+
+      if (FAILED(hr)) {
+        std::string errMsg = HResultToString(hr);
+        auto callback = [deferred = std::move(deferred), errMsg](Napi::Env env, Napi::Function) mutable {
+          deferred.Reject(Napi::Error::New(env, errMsg).Value());
+        };
+        tsfnPromise.BlockingCall(callback);
+        tsfnPromise.Release();
+        return;
+      }
+
+      auto callback = [deferred = std::move(deferred), formats = std::move(formats)](Napi::Env env, Napi::Function) mutable {
+        Napi::Array arr = Napi::Array::New(env, static_cast<uint32_t>(formats.size()));
+        for (uint32_t i = 0; i < formats.size(); ++i) {
+          Napi::Object obj = Napi::Object::New(env);
+          obj.Set("width", Napi::Number::New(env, std::get<0>(formats[i])));
+          obj.Set("height", Napi::Number::New(env, std::get<1>(formats[i])));
+          obj.Set("frameRate", Napi::Number::New(env, std::get<2>(formats[i])));
+          obj.Set("subtype", Napi::String::New(env, std::get<3>(formats[i])));
+          arr.Set(i, obj);
+        }
+        deferred.Resolve(arr);
+      };
+
+      tsfnPromise.BlockingCall(callback);
+    } catch (const std::exception& e) {
+      auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
         deferred.Reject(Napi::Error::New(env, message).Value());
       };
       tsfnPromise.BlockingCall(callback);

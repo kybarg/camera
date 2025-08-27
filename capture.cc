@@ -705,6 +705,128 @@ HRESULT CCapture::EndCaptureInternal() {
   return hr;
 }
 
+// Enumerate supported native media types from the active source reader.
+HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, UINT32, std::string>>& outFormats) {
+  outFormats.clear();
+
+  if (m_pReader == NULL) return E_FAIL;
+
+  DWORD index = 0;
+  while (true) {
+    IMFMediaType* pType = NULL;
+    HRESULT hr = m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
+    if (FAILED(hr)) break;
+
+    GUID subtype = {0};
+    UINT32 width = 0, height = 0;
+    UINT32 num = 0, denom = 0;
+
+    pType->GetGUID(MF_MT_SUBTYPE, &subtype);
+    MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
+    MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
+    UINT32 frameRate = 0;
+    if (denom != 0) frameRate = num / denom;
+
+    // Convert subtype to string
+    LPOLESTR psz = NULL;
+    StringFromCLSID(subtype, &psz);
+    std::wstring ws;
+    if (psz) {
+      ws = psz;
+      CoTaskMemFree(psz);
+    }
+    int len = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, NULL, 0, NULL, NULL);
+    std::string subtypeStr;
+    if (len > 0) {
+      subtypeStr.resize(len);
+      WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, &subtypeStr[0], len, NULL, NULL);
+      if (!subtypeStr.empty() && subtypeStr.back() == '\0') subtypeStr.pop_back();
+    }
+
+    outFormats.emplace_back(width, height, frameRate, subtypeStr);
+
+    SafeRelease(&pType);
+    ++index;
+  }
+
+  return S_OK;
+}
+
+// static
+HRESULT CCapture::EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vector<std::tuple<UINT32, UINT32, UINT32, std::string>>& outFormats) {
+  outFormats.clear();
+
+  if (!pActivate) return E_POINTER;
+
+  HRESULT hr = S_OK;
+  HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+  bool coInitialized = SUCCEEDED(hrCo);
+  HRESULT hrMF = MFStartup(MF_VERSION);
+  bool mfStarted = SUCCEEDED(hrMF);
+
+  IMFMediaSource* pSource = nullptr;
+  IMFAttributes* pAttributes = nullptr;
+  IMFSourceReader* pReader = nullptr;
+
+  hr = pActivate->ActivateObject(__uuidof(IMFMediaSource), (void**)&pSource);
+  if (SUCCEEDED(hr)) {
+    hr = MFCreateAttributes(&pAttributes, 1);
+  }
+  if (SUCCEEDED(hr)) {
+    hr = pAttributes->SetUnknown(MF_SOURCE_READER_ASYNC_CALLBACK, NULL);
+  }
+  if (SUCCEEDED(hr)) {
+    hr = MFCreateSourceReaderFromMediaSource(pSource, pAttributes, &pReader);
+  }
+
+  if (SUCCEEDED(hr) && pReader) {
+    DWORD index = 0;
+    while (true) {
+      IMFMediaType* pType = NULL;
+      HRESULT hrType = pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
+      if (FAILED(hrType)) break;
+
+      GUID subtype = {0};
+      UINT32 width = 0, height = 0;
+      UINT32 num = 0, denom = 0;
+
+      pType->GetGUID(MF_MT_SUBTYPE, &subtype);
+      MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
+      MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
+      UINT32 frameRate = 0;
+      if (denom != 0) frameRate = num / denom;
+
+      LPOLESTR psz = NULL;
+      StringFromCLSID(subtype, &psz);
+      std::wstring ws;
+      if (psz) {
+        ws = psz;
+        CoTaskMemFree(psz);
+      }
+      int len = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, NULL, 0, NULL, NULL);
+      std::string subtypeStr;
+      if (len > 0) {
+        subtypeStr.resize(len);
+        WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, &subtypeStr[0], len, NULL, NULL);
+        if (!subtypeStr.empty() && subtypeStr.back() == '\0') subtypeStr.pop_back();
+      }
+
+      outFormats.emplace_back(width, height, frameRate, subtypeStr);
+
+      SafeRelease(&pType);
+      ++index;
+    }
+  }
+
+  if (pReader) SafeRelease(&pReader);
+  if (pAttributes) SafeRelease(&pAttributes);
+  if (pSource) SafeRelease(&pSource);
+  if (mfStarted) MFShutdown();
+  if (coInitialized) CoUninitialize();
+
+  return hr;
+}
+
 //-------------------------------------------------------------------
 // CopyAttribute
 //

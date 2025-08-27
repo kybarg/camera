@@ -48,8 +48,12 @@ Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
           for (size_t i = 0; i < deviceData.size(); i++) {
             Napi::Object deviceInfo = Napi::Object::New(env);
 
-            deviceInfo.Set("friendlyName", Napi::String::New(env, reinterpret_cast<const char16_t*>(deviceData[i].friendlyName.c_str())));
-            deviceInfo.Set("symbolicLink", Napi::String::New(env, reinterpret_cast<const char16_t*>(deviceData[i].symbolicLink.c_str())));
+            // Convert std::wstring (wide chars) to std::u16string for N-API
+            std::u16string friendlyU16(deviceData[i].friendlyName.begin(), deviceData[i].friendlyName.end());
+            std::u16string symbolicU16(deviceData[i].symbolicLink.begin(), deviceData[i].symbolicLink.end());
+
+            deviceInfo.Set("friendlyName", Napi::String::New(env, friendlyU16));
+            deviceInfo.Set("symbolicLink", Napi::String::New(env, symbolicU16));
             devices.Set(i, deviceInfo);
           }
 
@@ -113,7 +117,9 @@ Napi::Value Camera::ClaimDeviceAsync(const Napi::CallbackInfo& info) {
           Napi::Object result = Napi::Object::New(env);
           result.Set("success", Napi::Boolean::New(env, true));
           result.Set("message", Napi::String::New(env, "Device claimed successfully"));
-          result.Set("symbolicLink", Napi::String::New(env, reinterpret_cast<const char16_t*>(symbolicLink.c_str())));
+          // Convert std::wstring to std::u16string for N-API
+          std::u16string symbolicU16(symbolicLink.begin(), symbolicLink.end());
+          result.Set("symbolicLink", Napi::String::New(env, symbolicU16));
           deferred.Resolve(result);
         };
 

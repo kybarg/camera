@@ -2,7 +2,7 @@
 #define CAMERA_H
 
 #include <napi.h>
-#include "device.h"
+#include "capture.h"
 
 class Camera : public Napi::ObjectWrap<Camera> {
  public:
@@ -10,7 +10,7 @@ class Camera : public Napi::ObjectWrap<Camera> {
   Camera(const Napi::CallbackInfo& info);
   ~Camera();
 
-  CaptureDevice device;
+  CCapture device;
 
   Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);
   Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);

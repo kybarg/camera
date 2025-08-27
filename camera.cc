@@ -10,9 +10,7 @@
 #include <objbase.h>
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
-  Napi::Function func = DefineClass(env, "Camera", {
-                                                       InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("getDimensions", &Camera::GetDimensions)
-                                                   });
+  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("getDimensions", &Camera::GetDimensions)});
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
   *constructor = Napi::Persistent(func);
@@ -281,7 +279,7 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
         return;
       }
 
-  auto callback = [deferred = std::move(deferred), formats = std::move(formats)](Napi::Env env, Napi::Function) mutable {
+      auto callback = [deferred = std::move(deferred), formats = std::move(formats)](Napi::Env env, Napi::Function) mutable {
         Napi::Array arr = Napi::Array::New(env, static_cast<uint32_t>(formats.size()));
         for (uint32_t i = 0; i < formats.size(); ++i) {
           Napi::Object obj = Napi::Object::New(env);

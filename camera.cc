@@ -396,41 +396,58 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
 
       if (SUCCEEDED(hr)) {
         auto frameCallbackLambda = [this, tsfnFrame, hasFrameCallback](IMFMediaBuffer* buf) mutable -> HRESULT {
-          if (hasFrameCallback) {
-            buf->AddRef();  // Add reference for the callback
-
-            auto callback = [](Napi::Env env, Napi::Function jsCallback, IMFMediaBuffer* buffer) {
-              BYTE* bufData = nullptr;
-              DWORD bufLength;
-              HRESULT hr = buffer->Lock(&bufData, nullptr, &bufLength);
-
-              if (SUCCEEDED(hr)) {
-                // Create a copy of the buffer data that Node.js will own
-                BYTE* ownedData = new BYTE[bufLength];
-                memcpy(ownedData, bufData, bufLength);
-
-                buffer->Unlock();
-
-                // Create Node.js buffer with finalizer for automatic cleanup
-                Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::New(
-                    env,
-                    ownedData,
-                    bufLength,
-                    [](Napi::Env env, BYTE* data) {
-                      delete[] data;  // Automatic cleanup when Node.js is done with the buffer
-                    });
-
-                // Call the JavaScript frame event emitter with the zero-copy buffer
-                jsCallback.Call({bufferN});
-              }
-
-              // Release the IMFMediaBuffer
-              buffer->Release();
-            };
-
-            napi_status status = tsfnFrame.BlockingCall(buf, callback);
-            return (status == napi_ok) ? S_OK : E_FAIL;
+          if (!hasFrameCallback) {
+            return S_OK;
           }
+
+          // Take an extra reference for passing the buffer to the JS thread
+          buf->AddRef();
+
+          // JS-side callback that will lock/unlock and release the IMFMediaBuffer
+          auto callback = [](Napi::Env env, Napi::Function jsCallback, IMFMediaBuffer* buffer) {
+            BYTE* bufData = nullptr;
+            DWORD bufLength = 0;
+            HRESULT hrLock = buffer->Lock(&bufData, nullptr, &bufLength);
+            bool locked = SUCCEEDED(hrLock);
+
+            if (locked && bufLength > 0) {
+              // Copy the buffer data; Node owns the copy
+              BYTE* ownedData = new BYTE[bufLength];
+              memcpy(ownedData, bufData, bufLength);
+
+              // Unlock after reading
+              buffer->Unlock();
+
+              // Create Node.js buffer with finalizer for automatic cleanup
+              Napi::Buffer<BYTE> bufferN = Napi::Buffer<BYTE>::New(
+                  env,
+                  ownedData,
+                  bufLength,
+                  [](Napi::Env /*env*/, BYTE* data) {
+                    delete[] data;
+                  });
+
+              // Call the JavaScript frame event emitter
+              jsCallback.Call({bufferN});
+            } else if (locked) {
+              // Nothing to send, just unlock
+              buffer->Unlock();
+            }
+
+            // Release the IMFMediaBuffer reference taken by the producer
+            buffer->Release();
+          };
+
+          // Try to queue the buffer to JS without blocking; drop if queue is full
+          napi_status status = tsfnFrame.NonBlockingCall(buf, callback);
+
+          if (status == napi_ok) {
+            return S_OK;
+          }
+
+          // If the queue is full or another error occurred, drop the frame and release our ref
+          buf->Release();
+          // Treat dropped frames as non-fatal for the capture pipeline
           return S_OK;
         };
 

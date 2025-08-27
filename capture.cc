@@ -498,6 +498,8 @@ HRESULT CCapture::StartCapture(
 
   EnterCriticalSection(&m_critsec);
 
+  // Entry: start capture
+
   // If we don't already have a source reader, create the media source
   // and open it. InitFromActivate may have already created m_pReader
   // so avoid re-activating/opening which can cause the media source to
@@ -507,6 +509,7 @@ HRESULT CCapture::StartCapture(
     hr = pActivate->ActivateObject(
         __uuidof(IMFMediaSource),
         (void**)&pSource);
+  // ActivateObject result in hr
 
     // Get the symbolic link. This is needed to handle device-
     // loss notifications. (See CheckDeviceLost.)
@@ -515,10 +518,11 @@ HRESULT CCapture::StartCapture(
           MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
           &m_pwszSymbolicLink,
           NULL);
+  // GetAllocatedString result in hr
     }
 
     if (SUCCEEDED(hr)) {
-      hr = OpenMediaSource(pSource);
+  hr = OpenMediaSource(pSource);
     }
   } else {
     // We already initialized the source reader in InitFromActivate.
@@ -550,7 +554,7 @@ HRESULT CCapture::StartCapture(
       // Prefer RGB32 by asking ConfigureSourceReader to set the reader's
       // output type. ConfigureSourceReader will try RGB32 first and fall
       // back to other supported formats.
-      HRESULT hrCfg = ConfigureSourceReader(m_pReader);
+  HRESULT hrCfg = ConfigureSourceReader(m_pReader);
       if (FAILED(hrCfg)) {
         // Non-fatal: continue with whatever format the reader provides.
         hr = S_OK;
@@ -564,13 +568,13 @@ HRESULT CCapture::StartCapture(
 
     // Request the first video frame.
 
-    hr = m_pReader->ReadSample(
-        (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-        0,
-        NULL,
-        NULL,
-        NULL,
-        NULL);
+  hr = m_pReader->ReadSample(
+    (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+    0,
+    NULL,
+    NULL,
+    NULL,
+    NULL);
   }
 
   SafeRelease(&pSource);
@@ -632,7 +636,14 @@ HRESULT CCapture::EndCaptureSession() {
   }
 
   SafeRelease(&m_pWriter);
-  SafeRelease(&m_pReader);
+  // Keep m_pReader alive to allow clean restart without re-activating the media source.
+  // The full cleanup of m_pReader will occur in ReleaseDevice().
+
+  // Clear any registered frame callback and reset state so capture can be restarted.
+  m_frameCallback = nullptr;
+  m_rgbaBuffer.clear();
+  m_bFirstSample = TRUE;
+  m_llBaseTime = 0;
 
   LeaveCriticalSection(&m_critsec);
 

@@ -23,6 +23,14 @@
 #include <vector>
 #include <tuple>
 
+template <class T>
+inline void SafeRelease(T** ppT) {
+  if (ppT && *ppT) {
+    (*ppT)->Release();
+    *ppT = NULL;
+  }
+}
+
 const UINT WM_APP_PREVIEW_ERROR = WM_APP + 1;  // wparam = HRESULT
 
 class DeviceList {
@@ -88,6 +96,12 @@ class CCapture : public IMFSourceReaderCallback {
   HRESULT InitFromActivate(IMFActivate* pActivate);
   // Enumerate supported native media types from the active source reader (if any).
   HRESULT GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats);
+  // Set the desired native media type on the source reader (width, height, frameRate)
+  HRESULT SetDesiredFormat(UINT32 width, UINT32 height, double frameRate);
+  // Get current dimensions from the source reader (width, height, frameRate)
+  HRESULT GetCurrentDimensions(UINT32* pWidth, UINT32* pHeight, double* pFrameRate);
+  // Return last enumerated supported formats (stored internally)
+  const std::vector<std::tuple<UINT32, UINT32, double>>& GetLastSupportedFormats() const { return m_lastSupportedFormats; }
   // (EnumerateFormatsFromActivate removed; CCapture now supports InitFromActivate and GetSupportedFormats)
 
  protected:
@@ -121,4 +135,6 @@ class CCapture : public IMFSourceReaderCallback {
   LONGLONG m_llBaseTime;
 
   WCHAR* m_pwszSymbolicLink;
+  // Cache of last enumerated formats
+  std::vector<std::tuple<UINT32, UINT32, double>> m_lastSupportedFormats;
 };

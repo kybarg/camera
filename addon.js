@@ -9,14 +9,24 @@ class Camera extends EventEmitter {
     this._nativeCamera = new addon.Camera();
 
     // Bind async methods from native camera
-    this.enumerateDevices = this._nativeCamera.enumerateDevicesAsync.bind(this._nativeCamera);
-    this.claimDevice = this._nativeCamera.claimDeviceAsync.bind(this._nativeCamera);
+    this.enumerateDevices = this._nativeCamera.enumerateDevicesAsync.bind(
+      this._nativeCamera
+    );
+    this.claimDevice = this._nativeCamera.claimDeviceAsync.bind(
+      this._nativeCamera
+    );
     // this.releaseDevice = this._nativeCamera.releaseDeviceAsync.bind(this._nativeCamera);
 
-  // // Bind other native methods
-  this.getSupportedFormats = this._nativeCamera.getSupportedFormatsAsync.bind(this._nativeCamera);
-    // this.setDesiredFormat = this._nativeCamera.setDesiredFormatAsync.bind(this._nativeCamera);
-    // this.getDimensions = this._nativeCamera.getDimensions.bind(this._nativeCamera);
+    // // Bind other native methods
+    this.getSupportedFormats = this._nativeCamera.getSupportedFormatsAsync.bind(
+      this._nativeCamera
+    );
+    this.setDesiredFormat = this._nativeCamera.setDesiredFormatAsync.bind(
+      this._nativeCamera
+    );
+    this.getDimensions = this._nativeCamera.getDimensions.bind(
+      this._nativeCamera
+    );
 
     // this._isCapturing = false;
 

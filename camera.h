@@ -13,6 +13,7 @@ class Camera : public Napi::ObjectWrap<Camera> {
   CCapture* device;
   IMFActivate* claimedActivate = nullptr;
   std::wstring claimedTempFile;
+  // Camera delegates supported-format and format-setting operations to CCapture
 
   Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);
   Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);
@@ -20,7 +21,9 @@ class Camera : public Napi::ObjectWrap<Camera> {
   // Napi::Value StartCaptureAsync(const Napi::CallbackInfo& info);
   // Napi::Value StopCaptureAsync(const Napi::CallbackInfo& info);
   // Napi::Value GetDimensions(const Napi::CallbackInfo& info);
+  Napi::Value GetDimensions(const Napi::CallbackInfo& info);
   Napi::Value GetSupportedFormatsAsync(const Napi::CallbackInfo& info);
+  Napi::Value SetDesiredFormatAsync(const Napi::CallbackInfo& info);
   // Napi::Value SetDesiredFormatAsync(const Napi::CallbackInfo& info);
 };
 

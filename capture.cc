@@ -24,14 +24,6 @@
 #include <cmath>
 #include <new>
 
-template <class T>
-void SafeRelease(T** ppT) {
-  if (*ppT) {
-    (*ppT)->Release();
-    *ppT = NULL;
-  }
-}
-
 #include "capture.h"
 
 // Use SDK QISearch implementation (link to SDK libs via binding.gyp)
@@ -773,6 +765,67 @@ HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, dou
   temp.erase(last, temp.end());
 
   outFormats = std::move(temp);
+  // store in internal cache as well
+  m_lastSupportedFormats = outFormats;
+  return S_OK;
+}
+
+HRESULT CCapture::SetDesiredFormat(UINT32 width, UINT32 height, double frameRate) {
+  if (m_pReader == NULL) return E_FAIL;
+
+  DWORD index = 0;
+  HRESULT hr = E_FAIL;
+  while (true) {
+    IMFMediaType* pType = NULL;
+    HRESULT hrType = m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
+    if (FAILED(hrType)) break;
+
+    UINT32 w = 0, h = 0;
+    UINT32 num = 0, denom = 0;
+    MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &w, &h);
+    MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
+    double fr = 0.0;
+    if (denom != 0) fr = static_cast<double>(num) / static_cast<double>(denom);
+
+    if (w == width && h == height && std::abs(fr - frameRate) < 1e-6) {
+      hr = m_pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pType);
+      SafeRelease(&pType);
+      break;
+    }
+
+    SafeRelease(&pType);
+    ++index;
+  }
+
+  return hr;
+}
+
+HRESULT CCapture::GetCurrentDimensions(UINT32* pWidth, UINT32* pHeight, double* pFrameRate) {
+  if (pWidth) *pWidth = 0;
+  if (pHeight) *pHeight = 0;
+  if (pFrameRate) *pFrameRate = 0.0;
+
+  if (m_pReader == NULL) return E_FAIL;
+
+  IMFMediaType* pType = NULL;
+  HRESULT hr = m_pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType);
+  if (FAILED(hr) || pType == NULL) {
+    SafeRelease(&pType);
+    return hr;
+  }
+
+  UINT32 w = 0, h = 0;
+  UINT32 num = 0, denom = 0;
+  MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &w, &h);
+  MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
+  double fr = 0.0;
+  if (denom != 0) fr = static_cast<double>(num) / static_cast<double>(denom);
+
+  if (pWidth) *pWidth = w;
+  if (pHeight) *pHeight = h;
+  if (pFrameRate) *pFrameRate = fr;
+
+  SafeRelease(&pType);
   return S_OK;
 }
 

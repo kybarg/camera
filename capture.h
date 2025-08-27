@@ -85,9 +85,9 @@ class CCapture : public IMFSourceReaderCallback {
   BOOL IsCapturing();
   HRESULT CheckDeviceLost(DEV_BROADCAST_HDR* pHdr, BOOL* pbDeviceLost);
   // Enumerate supported native media types from the active source reader (if any).
-  HRESULT GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, UINT32, std::string>>& outFormats);
+  HRESULT GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats);
   // Enumerate supported formats by activating an IMFActivate and creating a temporary reader.
-  static HRESULT EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vector<std::tuple<UINT32, UINT32, UINT32, std::string>>& outFormats);
+  static HRESULT EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vector<std::tuple<UINT32, UINT32, double>>& outFormats);
 
  protected:
   enum State {

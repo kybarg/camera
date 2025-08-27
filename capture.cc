@@ -19,7 +19,9 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <shlwapi.h>
+#include <string>
 #include <algorithm>
+#include <cmath>
 #include <new>
 
 template <class T>
@@ -706,10 +708,12 @@ HRESULT CCapture::EndCaptureInternal() {
 }
 
 // Enumerate supported native media types from the active source reader.
-HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, UINT32, std::string>>& outFormats) {
+HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats) {
   outFormats.clear();
 
   if (m_pReader == NULL) return E_FAIL;
+
+  std::vector<std::tuple<UINT32, UINT32, double>> temp;
 
   DWORD index = 0;
   while (true) {
@@ -717,43 +721,39 @@ HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, UIN
     HRESULT hr = m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
     if (FAILED(hr)) break;
 
-    GUID subtype = {0};
     UINT32 width = 0, height = 0;
     UINT32 num = 0, denom = 0;
 
-    pType->GetGUID(MF_MT_SUBTYPE, &subtype);
     MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
     MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
-    UINT32 frameRate = 0;
-    if (denom != 0) frameRate = num / denom;
+    double frameRate = 0.0;
+    if (denom != 0) frameRate = static_cast<double>(num) / static_cast<double>(denom);
 
-    // Convert subtype to string
-    LPOLESTR psz = NULL;
-    StringFromCLSID(subtype, &psz);
-    std::wstring ws;
-    if (psz) {
-      ws = psz;
-      CoTaskMemFree(psz);
-    }
-    int len = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, NULL, 0, NULL, NULL);
-    std::string subtypeStr;
-    if (len > 0) {
-      subtypeStr.resize(len);
-      WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, &subtypeStr[0], len, NULL, NULL);
-      if (!subtypeStr.empty() && subtypeStr.back() == '\0') subtypeStr.pop_back();
-    }
-
-    outFormats.emplace_back(width, height, frameRate, subtypeStr);
+    temp.emplace_back(width, height, frameRate);
 
     SafeRelease(&pType);
     ++index;
   }
 
+  // Sort and deduplicate (use small epsilon for floating-point FPS)
+  std::sort(temp.begin(), temp.end(), [](const auto& a, const auto& b) {
+    if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
+    if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
+    return std::get<2>(a) < std::get<2>(b);
+  });
+
+  const double eps = 1e-6;
+  auto last = std::unique(temp.begin(), temp.end(), [eps](const auto& a, const auto& b) {
+    return std::get<0>(a) == std::get<0>(b) && std::get<1>(a) == std::get<1>(b) && std::fabs(std::get<2>(a) - std::get<2>(b)) < eps;
+  });
+  temp.erase(last, temp.end());
+
+  outFormats = std::move(temp);
   return S_OK;
 }
 
 // static
-HRESULT CCapture::EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vector<std::tuple<UINT32, UINT32, UINT32, std::string>>& outFormats) {
+HRESULT CCapture::EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vector<std::tuple<UINT32, UINT32, double>>& outFormats) {
   outFormats.clear();
 
   if (!pActivate) return E_POINTER;
@@ -779,6 +779,8 @@ HRESULT CCapture::EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vect
     hr = MFCreateSourceReaderFromMediaSource(pSource, pAttributes, &pReader);
   }
 
+  std::vector<std::tuple<UINT32, UINT32, double>> temp;
+
   if (SUCCEEDED(hr) && pReader) {
     DWORD index = 0;
     while (true) {
@@ -786,32 +788,15 @@ HRESULT CCapture::EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vect
       HRESULT hrType = pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
       if (FAILED(hrType)) break;
 
-      GUID subtype = {0};
       UINT32 width = 0, height = 0;
       UINT32 num = 0, denom = 0;
 
-      pType->GetGUID(MF_MT_SUBTYPE, &subtype);
       MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
       MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
-      UINT32 frameRate = 0;
-      if (denom != 0) frameRate = num / denom;
+      double frameRate = 0.0;
+      if (denom != 0) frameRate = static_cast<double>(num) / static_cast<double>(denom);
 
-      LPOLESTR psz = NULL;
-      StringFromCLSID(subtype, &psz);
-      std::wstring ws;
-      if (psz) {
-        ws = psz;
-        CoTaskMemFree(psz);
-      }
-      int len = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, NULL, 0, NULL, NULL);
-      std::string subtypeStr;
-      if (len > 0) {
-        subtypeStr.resize(len);
-        WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, &subtypeStr[0], len, NULL, NULL);
-        if (!subtypeStr.empty() && subtypeStr.back() == '\0') subtypeStr.pop_back();
-      }
-
-      outFormats.emplace_back(width, height, frameRate, subtypeStr);
+      temp.emplace_back(width, height, frameRate);
 
       SafeRelease(&pType);
       ++index;
@@ -823,6 +808,21 @@ HRESULT CCapture::EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vect
   if (pSource) SafeRelease(&pSource);
   if (mfStarted) MFShutdown();
   if (coInitialized) CoUninitialize();
+
+  // Sort and deduplicate
+  std::sort(temp.begin(), temp.end(), [](const auto& a, const auto& b) {
+    if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
+    if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
+    return std::get<2>(a) < std::get<2>(b);
+  });
+
+  const double eps = 1e-6;
+  auto last = std::unique(temp.begin(), temp.end(), [eps](const auto& a, const auto& b) {
+    return std::get<0>(a) == std::get<0>(b) && std::get<1>(a) == std::get<1>(b) && std::fabs(std::get<2>(a) - std::get<2>(b)) < eps;
+  });
+  temp.erase(last, temp.end());
+
+  outFormats = std::move(temp);
 
   return hr;
 }

@@ -40,7 +40,7 @@ async function takeCameraSnapshot() {
     console.log(`✅ Found ${formats.length} supported format(s):`);
 
     // Display first few formats for reference
-    const displayCount = Math.min(5, formats.length);
+    const displayCount = Math.min(10, formats.length);
     for (let i = 0; i < displayCount; i++) {
       const format = formats[i];
       console.log(

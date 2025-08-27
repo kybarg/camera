@@ -239,7 +239,7 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
 
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
     try {
-      std::vector<std::tuple<UINT32, UINT32, UINT32, std::string>> formats;
+    std::vector<std::tuple<UINT32, UINT32, double>> formats;
       HRESULT hr = S_OK;
 
       if (this->device != nullptr) {
@@ -265,14 +265,14 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
         return;
       }
 
-      auto callback = [deferred = std::move(deferred), formats = std::move(formats)](Napi::Env env, Napi::Function) mutable {
+    auto callback = [deferred = std::move(deferred), formats = std::move(formats)](Napi::Env env, Napi::Function) mutable {
         Napi::Array arr = Napi::Array::New(env, static_cast<uint32_t>(formats.size()));
         for (uint32_t i = 0; i < formats.size(); ++i) {
           Napi::Object obj = Napi::Object::New(env);
           obj.Set("width", Napi::Number::New(env, std::get<0>(formats[i])));
           obj.Set("height", Napi::Number::New(env, std::get<1>(formats[i])));
           obj.Set("frameRate", Napi::Number::New(env, std::get<2>(formats[i])));
-          obj.Set("subtype", Napi::String::New(env, std::get<3>(formats[i])));
+      // subtype removed; not exposing format subtype to JS
           arr.Set(i, obj);
         }
         deferred.Resolve(arr);

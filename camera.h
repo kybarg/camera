@@ -10,16 +10,16 @@ class Camera : public Napi::ObjectWrap<Camera> {
   Camera(const Napi::CallbackInfo& info);
   ~Camera();
 
-  CCapture device;
+  CCapture* device;
 
   Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);
-  Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);
-  Napi::Value ReleaseDeviceAsync(const Napi::CallbackInfo& info);
-  Napi::Value StartCaptureAsync(const Napi::CallbackInfo& info);
-  Napi::Value StopCaptureAsync(const Napi::CallbackInfo& info);
-  Napi::Value GetDimensions(const Napi::CallbackInfo& info);
-  Napi::Value GetSupportedFormatsAsync(const Napi::CallbackInfo& info);
-  Napi::Value SetDesiredFormatAsync(const Napi::CallbackInfo& info);
+  // Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);
+  // Napi::Value ReleaseDeviceAsync(const Napi::CallbackInfo& info);
+  // Napi::Value StartCaptureAsync(const Napi::CallbackInfo& info);
+  // Napi::Value StopCaptureAsync(const Napi::CallbackInfo& info);
+  // Napi::Value GetDimensions(const Napi::CallbackInfo& info);
+  // Napi::Value GetSupportedFormatsAsync(const Napi::CallbackInfo& info);
+  // Napi::Value SetDesiredFormatAsync(const Napi::CallbackInfo& info);
 };
 
 #endif

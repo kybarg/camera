@@ -13,11 +13,11 @@
 
 #pragma once
 
+#include <windows.h>
 #include <Dbt.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
-#include <windows.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,7 +38,6 @@ class DeviceList {
   UINT32 Count() const { return m_cDevices; }
 
   void Clear();
-  HRESULT EnumerateDevices();
   // Find and return the IMFActivate whose friendly name or symbolic link matches
   // the provided identifier (case-insensitive). The returned IMFActivate is AddRef'd.
   HRESULT GetDevice(const WCHAR* identifier, IMFActivate** ppActivate);

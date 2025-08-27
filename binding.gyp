@@ -19,6 +19,11 @@
         "-lMfreadwrite",
         "-lMfuuid",
         "-lwmcodecdspuuid"
+  ,
+  "-lole32",
+  "-luuid",
+  "-lstrmiids",
+  "-lshlwapi"
       ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")"

@@ -11,6 +11,7 @@
 //
 //////////////////////////////////////////////////////////////////////////
 
+#include <windows.h>
 #include <Dbt.h>
 #include <Wmcodecdsp.h>
 #include <assert.h>
@@ -18,7 +19,6 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <shlwapi.h>
-#include <windows.h>
 #include <new>
 
 template <class T>
@@ -45,33 +45,8 @@ void DeviceList::Clear() {
   m_cDevices = 0;
 }
 
-HRESULT DeviceList::EnumerateDevices() {
-  HRESULT hr = S_OK;
-  IMFAttributes* pAttributes = NULL;
-
-  Clear();
-
-  // Initialize an attribute store. We will use this to
-  // specify the enumeration parameters.
-
-  hr = MFCreateAttributes(&pAttributes, 1);
-
-  // Ask for source type = video capture devices
-  if (SUCCEEDED(hr)) {
-    hr = pAttributes->SetGUID(
-        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
-        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
-  }
-
-  // Enumerate devices.
-  if (SUCCEEDED(hr)) {
-    hr = MFEnumDeviceSources(pAttributes, &m_ppDevices, &m_cDevices);
-  }
-
-  SafeRelease(&pAttributes);
-
-  return hr;
-}
+// Note: EnumerateDevices was removed from the public API. GetAllDevices
+// performs enumeration internally to simplify the DeviceList interface.
 
 // ... index-based GetDevice removed; use GetDevice(identifier, ppActivate) instead.
 HRESULT DeviceList::GetDevice(const WCHAR* identifier, IMFActivate** ppActivate) {
@@ -119,6 +94,33 @@ HRESULT DeviceList::GetDevice(const WCHAR* identifier, IMFActivate** ppActivate)
 
 HRESULT DeviceList::GetAllDevices(std::vector<std::pair<std::wstring, std::wstring>>& outDevices) {
   outDevices.clear();
+
+  // Ensure we have an up-to-date device list by performing enumeration here
+  HRESULT hr = S_OK;
+  IMFAttributes* pAttributes = NULL;
+
+  Clear();
+
+  // Initialize an attribute store. We will use this to specify the enumeration parameters.
+  hr = MFCreateAttributes(&pAttributes, 1);
+
+  // Ask for source type = video capture devices
+  if (SUCCEEDED(hr)) {
+    hr = pAttributes->SetGUID(
+        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+  }
+
+  // Enumerate devices.
+  if (SUCCEEDED(hr)) {
+    hr = MFEnumDeviceSources(pAttributes, &m_ppDevices, &m_cDevices);
+  }
+
+  SafeRelease(&pAttributes);
+
+  if (FAILED(hr)) {
+    return hr;
+  }
 
   UINT32 cnt = Count();
   for (UINT32 i = 0; i < cnt; i++) {

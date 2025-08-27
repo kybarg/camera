@@ -15,7 +15,9 @@ class Camera extends EventEmitter {
     this.claimDevice = this._nativeCamera.claimDeviceAsync.bind(
       this._nativeCamera
     );
-    // this.releaseDevice = this._nativeCamera.releaseDeviceAsync.bind(this._nativeCamera);
+    this.releaseDevice = this._nativeCamera.releaseDeviceAsync.bind(
+      this._nativeCamera
+    );
 
     // Bind other native methods
     this.getSupportedFormats = this._nativeCamera.getSupportedFormatsAsync.bind(
@@ -33,21 +35,23 @@ class Camera extends EventEmitter {
     // Frame event emitter used by native code
     this._frameEventEmitter = (frameData) => {
       // Keep reference alive until event handlers run
-      this.emit('frame', frameData);
+      this.emit("frame", frameData);
     };
   }
 
   // Modern async startCapture method with events
   async startCapture() {
     if (this._isCapturing) {
-      throw new Error('Capture is already in progress');
+      throw new Error("Capture is already in progress");
     }
 
     this._isCapturing = true;
 
     try {
       // Pass the frame event emitter to the native method
-      const result = await this._nativeCamera.startCapture(this._frameEventEmitter);
+      const result = await this._nativeCamera.startCapture(
+        this._frameEventEmitter
+      );
       return result;
     } catch (error) {
       this._isCapturing = false;
@@ -59,17 +63,17 @@ class Camera extends EventEmitter {
   async stopCapture() {
     this._isCapturing = false;
     try {
-  const result = await this._nativeCamera.stopCapture();
+      const result = await this._nativeCamera.stopCapture();
       return result;
     } catch (error) {
       throw error;
     }
   }
 
-  // // Helper method to check if capturing
-  // isCapturing() {
-  //   return this._isCapturing;
-  // }
+  // Helper method to check if capturing
+  isCapturing() {
+    return this._isCapturing;
+  }
 }
 
 module.exports = Camera;

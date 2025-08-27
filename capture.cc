@@ -340,9 +340,18 @@ HRESULT CCapture::OnReadSample(
                     int G = (298 * C - 100 * D - 208 * E + 128) >> 8;
                     int B = (298 * C + 516 * D + 128) >> 8;
 
-                    if (R < 0) R = 0; else if (R > 255) R = 255;
-                    if (G < 0) G = 0; else if (G > 255) G = 255;
-                    if (B < 0) B = 0; else if (B > 255) B = 255;
+                    if (R < 0)
+                      R = 0;
+                    else if (R > 255)
+                      R = 255;
+                    if (G < 0)
+                      G = 0;
+                    else if (G > 255)
+                      G = 255;
+                    if (B < 0)
+                      B = 0;
+                    else if (B > 255)
+                      B = 255;
 
                     size_t outIndex = (size_t)y * width * 4 + x * 4;
                     out[outIndex + 0] = static_cast<uint8_t>(R);
@@ -361,9 +370,9 @@ HRESULT CCapture::OnReadSample(
                 size_t end = expected;
                 for (size_t i = 0; i + 3 < end; i += 4) {
                   int y0 = p[i + 0];
-                  int u  = p[i + 1];
+                  int u = p[i + 1];
                   int y1 = p[i + 2];
-                  int v  = p[i + 3];
+                  int v = p[i + 3];
 
                   int c0 = y0 - 16;
                   int c1 = y1 - 16;
@@ -481,8 +490,8 @@ HRESULT CCapture::OpenMediaSource(IMFMediaSource* pSource) {
 //-------------------------------------------------------------------
 
 HRESULT CCapture::StartCapture(
-  IMFActivate* pActivate,
-  const EncodingParameters& param) {
+    IMFActivate* pActivate,
+    const EncodingParameters& param) {
   HRESULT hr = S_OK;
 
   IMFMediaSource* pSource = NULL;
@@ -1050,6 +1059,30 @@ HRESULT CCapture::GetCurrentDimensions(UINT32* pWidth, UINT32* pHeight, double* 
   if (pFrameRate) *pFrameRate = fr;
 
   SafeRelease(&pType);
+  return S_OK;
+}
+
+// ...existing code...
+// Add after last CCapture method (e.g., after GetCurrentDimensions)
+HRESULT CCapture::ReleaseDevice() {
+  EndCaptureSession();
+  if (m_pReader) {
+    m_pReader->Release();
+    m_pReader = nullptr;
+  }
+  if (m_pWriter) {
+    m_pWriter->Release();
+    m_pWriter = nullptr;
+  }
+  if (m_pwszSymbolicLink) {
+    CoTaskMemFree(m_pwszSymbolicLink);
+    m_pwszSymbolicLink = nullptr;
+  }
+  m_lastSupportedFormats.clear();
+  m_rgbaBuffer.clear();
+  m_frameCallback = nullptr;
+  m_bFirstSample = TRUE;
+  m_llBaseTime = 0;
   return S_OK;
 }
 

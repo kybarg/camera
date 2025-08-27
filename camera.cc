@@ -10,7 +10,7 @@
 #include <objbase.h>
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
-  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("startCapture", &Camera::StartCaptureAsync), InstanceMethod("stopCapture", &Camera::StopCaptureAsync)});
+  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("startCapture", &Camera::StartCaptureAsync), InstanceMethod("stopCapture", &Camera::StopCaptureAsync)});
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
   *constructor = Napi::Persistent(func);
@@ -417,221 +417,57 @@ Napi::Value Camera::GetDimensions(const Napi::CallbackInfo& info) {
   return result;
 }
 
-// Napi::Value Camera::ReleaseDeviceAsync(const Napi::CallbackInfo& info) {
-//   Napi::Env env = info.Env();
+Napi::Value Camera::ReleaseDeviceAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
 
-//   // Create a promise
-//   auto deferred = Napi::Promise::Deferred::New(env);
+  // Create a promise
+  auto deferred = Napi::Promise::Deferred::New(env);
 
-//   // Create thread-safe function for the promise resolution
-//   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-//       env,
-//       Napi::Function(),
-//       "ReleaseDeviceAsync",
-//       0,
-//       1);
+  // Create thread-safe function for the promise resolution
+  auto tsfnPromise = Napi::ThreadSafeFunction::New(
+      env,
+      Napi::Function(),
+      "ReleaseDeviceAsync",
+      0,
+      1);
 
-//   // Start async operation
-//   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
-//     try {
-//       HRESULT hr = device.ReleaseDevice();
+  // Start async operation
+  std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
+    try {
+      HRESULT hr = device->ReleaseDevice();
 
-//       if (SUCCEEDED(hr)) {
-//         auto callback = [deferred = std::move(deferred)](Napi::Env env, Napi::Function) mutable {
-//           Napi::Object result = Napi::Object::New(env);
-//           result.Set("success", Napi::Boolean::New(env, true));
-//           result.Set("message", Napi::String::New(env, "Device released successfully"));
-//           deferred.Resolve(result);
-//         };
+      if (SUCCEEDED(hr)) {
+        auto callback = [deferred = std::move(deferred)](Napi::Env env, Napi::Function) mutable {
+          Napi::Object result = Napi::Object::New(env);
+          result.Set("success", Napi::Boolean::New(env, true));
+          result.Set("message", Napi::String::New(env, "Device released successfully"));
+          deferred.Resolve(result);
+        };
 
-//         tsfnPromise.BlockingCall(callback);
-//       } else {
-//         auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
-//           _com_error err(hr);
-//           LPCTSTR errMsg = err.ErrorMessage();
-//           std::string message = errMsg;
-//           deferred.Reject(Napi::Error::New(env, message).Value());
-//         };
+        tsfnPromise.BlockingCall(callback);
+      } else {
+        auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
+          _com_error err(hr);
+          LPCTSTR errMsg = err.ErrorMessage();
+          std::string message = errMsg;
+          deferred.Reject(Napi::Error::New(env, message).Value());
+        };
 
-//         tsfnPromise.BlockingCall(callback);
-//       }
-//     } catch (const std::exception& e) {
-//       auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
-//         deferred.Reject(Napi::Error::New(env, message).Value());
-//       };
+        tsfnPromise.BlockingCall(callback);
+      }
+    } catch (const std::exception& e) {
+      auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
+        deferred.Reject(Napi::Error::New(env, message).Value());
+      };
 
-//       tsfnPromise.BlockingCall(callback);
-//     }
+      tsfnPromise.BlockingCall(callback);
+    }
 
-//     tsfnPromise.Release();
-//   }).detach();
+    tsfnPromise.Release();
+  }).detach();
 
-//   return deferred.Promise();
-// }
-
-// Napi::Value Camera::StopCaptureAsync(const Napi::CallbackInfo& info) {
-//   Napi::Env env = info.Env();
-
-//   // Create a promise
-//   auto deferred = Napi::Promise::Deferred::New(env);
-
-//   // Create thread-safe function for the promise resolution
-//   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-//       env,
-//       Napi::Function(),
-//       "StopCaptureAsync",
-//       0,
-//       1);
-
-//   // Start async operation
-//   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
-//     try {
-//       HRESULT hr = device.StopCapture();
-
-//       auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
-//         if (SUCCEEDED(hr)) {
-//           Napi::Object result = Napi::Object::New(env);
-//           result.Set("success", Napi::Boolean::New(env, true));
-//           result.Set("message", Napi::String::New(env, "Capture stopped successfully"));
-//           deferred.Resolve(result);
-//         } else {
-//           _com_error err(hr);
-//           LPCTSTR errMsg = err.ErrorMessage();
-//           std::string message = errMsg;
-//           deferred.Reject(Napi::Error::New(env, message).Value());
-//         }
-//       };
-
-//       tsfnPromise.BlockingCall(callback);
-//     } catch (const std::exception& e) {
-//       auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
-//         deferred.Reject(Napi::Error::New(env, message).Value());
-//       };
-
-//       tsfnPromise.BlockingCall(callback);
-//     }
-
-//     tsfnPromise.Release();
-//   }).detach();
-
-//   return deferred.Promise();
-// }
-
-// Napi::Value Camera::GetDimensions(const Napi::CallbackInfo& info) {
-//   Napi::Env env = info.Env();
-
-//   Napi::Object dimensions = Napi::Object::New(env);
-//   dimensions.Set("width", Napi::Number::New(env, device.width));
-//   dimensions.Set("height", Napi::Number::New(env, device.height));
-
-//   return dimensions;
-// }
-
-// Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
-//   Napi::Env env = info.Env();
-
-//   // Create a promise
-//   auto deferred = Napi::Promise::Deferred::New(env);
-
-//   // Create thread-safe function for the promise resolution
-//   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-//       env,
-//       Napi::Function(),
-//       "GetSupportedFormatsAsync",
-//       0,
-//       1);
-
-//   // Start async operation
-//   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
-//     try {
-//       auto formats = device.GetSupportedFormats();
-
-//       auto callback = [deferred = std::move(deferred), formats = std::move(formats)](Napi::Env env, Napi::Function) mutable {
-//         Napi::Array result = Napi::Array::New(env, formats.size());
-
-//         for (size_t i = 0; i < formats.size(); i++) {
-//           Napi::Object format = Napi::Object::New(env);
-//           format.Set("width", Napi::Number::New(env, std::get<0>(formats[i])));
-//           format.Set("height", Napi::Number::New(env, std::get<1>(formats[i])));
-//           format.Set("frameRate", Napi::Number::New(env, std::get<2>(formats[i])));
-//           result.Set(i, format);
-//         }
-
-//         deferred.Resolve(result);
-//       };
-
-//       tsfnPromise.BlockingCall(callback);
-//     } catch (const std::exception& e) {
-//       auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
-//         deferred.Reject(Napi::Error::New(env, message).Value());
-//       };
-
-//       tsfnPromise.BlockingCall(callback);
-//     }
-
-//     tsfnPromise.Release();
-//   }).detach();
-
-//   return deferred.Promise();
-// }
-
-// Napi::Value Camera::SetDesiredFormatAsync(const Napi::CallbackInfo& info) {
-//   Napi::Env env = info.Env();
-
-//   if (info.Length() < 3 || !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsNumber()) {
-//     Napi::TypeError::New(env, "Expected width, height, and frameRate as numbers").ThrowAsJavaScriptException();
-//     return env.Null();
-//   }
-
-//   UINT32 width = info[0].As<Napi::Number>().Uint32Value();
-//   UINT32 height = info[1].As<Napi::Number>().Uint32Value();
-//   UINT32 frameRate = info[2].As<Napi::Number>().Uint32Value();
-
-//   // Create a promise
-//   auto deferred = Napi::Promise::Deferred::New(env);
-
-//   // Create thread-safe function for the promise resolution
-//   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-//       env,
-//       Napi::Function(),
-//       "SetDesiredFormatAsync",
-//       0,
-//       1);
-
-//   // Start async operation
-//   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), width, height, frameRate]() mutable {
-//     try {
-//       HRESULT hr = device.SetDesiredFormat(width, height, frameRate);
-
-//       auto callback = [deferred = std::move(deferred), hr, this](Napi::Env env, Napi::Function) mutable {
-//         if (SUCCEEDED(hr)) {
-//           Napi::Object result = Napi::Object::New(env);
-//           result.Set("success", Napi::Boolean::New(env, true));
-//           result.Set("actualWidth", Napi::Number::New(env, device.width));
-//           result.Set("actualHeight", Napi::Number::New(env, device.height));
-//           deferred.Resolve(result);
-//         } else {
-//           Napi::Object result = Napi::Object::New(env);
-//           result.Set("success", Napi::Boolean::New(env, false));
-//           result.Set("error", Napi::String::New(env, "Failed to set desired format"));
-//           deferred.Reject(Napi::Error::New(env, "Failed to set desired format").Value());
-//         }
-//       };
-
-//       tsfnPromise.BlockingCall(callback);
-//     } catch (const std::exception& e) {
-//       auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
-//         deferred.Reject(Napi::Error::New(env, message).Value());
-//       };
-
-//       tsfnPromise.BlockingCall(callback);
-//     }
-
-//     tsfnPromise.Release();
-//   }).detach();
-
-//   return deferred.Promise();
-// }
+  return deferred.Promise();
+}
 
 Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();

@@ -22,18 +22,22 @@ async function zeroLengthTest(durationMs = 5000) {
     if (formats.length > 0) {
       let best = formats[0];
       let maxPix = best.width * best.height;
+      let maxFps = best.frameRate;
       for (const f of formats) {
         const p = f.width * f.height;
-        if (p > maxPix) {
+        if (p > maxPix || (p === maxPix && f.frameRate > maxFps)) {
           best = f;
           maxPix = p;
+          maxFps = f.frameRate;
         }
       }
-      console.log(`Selecting format ${best.width}x${best.height} @ ${best.frameRate}`);
+      console.log(
+        `Selecting format ${best.width}x${best.height} @ ${best.frameRate}`
+      );
       try {
         await camera.setDesiredFormat(best.width, best.height, best.frameRate);
       } catch (e) {
-        console.warn('Failed to set desired format:', e.message || e);
+        console.warn("Failed to set desired format:", e.message || e);
       }
     }
 
@@ -62,6 +66,8 @@ async function zeroLengthTest(durationMs = 5000) {
     console.log(`  Zero-length frames: ${zeroLengthFrames}`);
     console.log(`  Non-empty frames: ${totalFrames - zeroLengthFrames}`);
     console.log(`  Received any non-empty frame: ${receivedFirstNonEmpty}`);
+    const resultFps = totalFrames / (durationMs / 1000);
+    console.log(`  Result FPS: ${resultFps.toFixed(2)}`);
   } catch (err) {
     console.error("Error during test:", err);
     process.exit(1);

@@ -106,6 +106,8 @@ class CCapture : public IMFSourceReaderCallback {
   // Return last enumerated supported formats (stored internally)
   const std::vector<std::tuple<UINT32, UINT32, double>>& GetLastSupportedFormats() const { return m_lastSupportedFormats; }
   // (EnumerateFormatsFromActivate removed; CCapture now supports InitFromActivate and GetSupportedFormats)
+  // Release all claimed device resources and reset state
+  HRESULT ReleaseDevice();
 
  protected:
   enum State {
@@ -142,4 +144,6 @@ class CCapture : public IMFSourceReaderCallback {
   std::vector<std::tuple<UINT32, UINT32, double>> m_lastSupportedFormats;
   // Frame callback used when delivering frames to the embedding (JS)
   std::function<void(std::vector<uint8_t>&&)> m_frameCallback;
+  // Reusable RGBA buffer for frame conversion
+  std::vector<uint8_t> m_rgbaBuffer;
 };

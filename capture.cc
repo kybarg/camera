@@ -19,6 +19,7 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <shlwapi.h>
+#include <algorithm>
 #include <new>
 
 template <class T>
@@ -50,58 +51,36 @@ void DeviceList::Clear() {
 
 // ... index-based GetDevice removed; use GetDevice(identifier, ppActivate) instead.
 HRESULT DeviceList::GetDevice(const WCHAR* identifier, IMFActivate** ppActivate) {
-  if (identifier == nullptr || ppActivate == nullptr) {
-    return E_POINTER;
-  }
+  if (!identifier || !ppActivate) return E_POINTER;
 
-  // If we haven't enumerated yet, do a fresh enumeration so callers
-  // can use GetDevice() without first calling GetAllDevices().
+  *ppActivate = nullptr;
+
+  // Enumerate devices on demand
   if (m_cDevices == 0) {
-    IMFAttributes* pAttributes = NULL;
+    IMFAttributes* pAttributes = nullptr;
     HRESULT hr = MFCreateAttributes(&pAttributes, 1);
-    if (SUCCEEDED(hr)) {
-      hr = pAttributes->SetGUID(
-          MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
-          MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
-    }
-
-    if (SUCCEEDED(hr)) {
-      hr = MFEnumDeviceSources(pAttributes, &m_ppDevices, &m_cDevices);
-    }
-
+    if (SUCCEEDED(hr)) hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+    if (SUCCEEDED(hr)) hr = MFEnumDeviceSources(pAttributes, &m_ppDevices, &m_cDevices);
     SafeRelease(&pAttributes);
-    if (FAILED(hr)) {
-      return hr;
-    }
+    if (FAILED(hr)) { m_cDevices = 0; m_ppDevices = nullptr; return hr; }
   }
 
-  for (UINT32 i = 0; i < m_cDevices; ++i) {
+  if (!m_ppDevices || m_cDevices == 0) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+
+  const UINT32 MAX_DEVICES = 256;
+  UINT32 limit = (m_cDevices < MAX_DEVICES) ? m_cDevices : MAX_DEVICES;
+
+  for (UINT32 i = 0; i < limit; ++i) {
     WCHAR* pFriendly = nullptr;
     WCHAR* pSymbolic = nullptr;
-    HRESULT hr1 = m_ppDevices[i]->GetAllocatedString(
-        MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-        &pFriendly,
-        NULL);
-    HRESULT hr2 = m_ppDevices[i]->GetAllocatedString(
-        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
-        &pSymbolic,
-        NULL);
 
-    bool match = false;
-    if (SUCCEEDED(hr1) && pFriendly) {
-      if (_wcsicmp(pFriendly, identifier) == 0) {
-        match = true;
-      }
-    }
+    HRESULT hr1 = m_ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &pFriendly, nullptr);
+    HRESULT hr2 = m_ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, &pSymbolic, nullptr);
 
-    if (!match && SUCCEEDED(hr2) && pSymbolic) {
-      if (_wcsicmp(pSymbolic, identifier) == 0) {
-        match = true;
-      }
-    }
+    bool match = (SUCCEEDED(hr1) && pFriendly && _wcsicmp(pFriendly, identifier) == 0) || (SUCCEEDED(hr2) && pSymbolic && _wcsicmp(pSymbolic, identifier) == 0);
 
-    if (pFriendly) CoTaskMemFree(pFriendly);
-    if (pSymbolic) CoTaskMemFree(pSymbolic);
+    if (pFriendly) { CoTaskMemFree(pFriendly); pFriendly = nullptr; }
+    if (pSymbolic) { CoTaskMemFree(pSymbolic); pSymbolic = nullptr; }
 
     if (match) {
       *ppActivate = m_ppDevices[i];
@@ -116,23 +95,17 @@ HRESULT DeviceList::GetDevice(const WCHAR* identifier, IMFActivate** ppActivate)
 HRESULT DeviceList::GetAllDevices(std::vector<std::pair<std::wstring, std::wstring>>& outDevices) {
   outDevices.clear();
 
-  // Ensure we have an up-to-date device list by performing enumeration here
-  HRESULT hr = S_OK;
-  IMFAttributes* pAttributes = NULL;
-
+  // Fresh enumeration each call keeps caller code simple.
   Clear();
 
-  // Initialize an attribute store. We will use this to specify the enumeration parameters.
-  hr = MFCreateAttributes(&pAttributes, 1);
-
-  // Ask for source type = video capture devices
+  IMFAttributes* pAttributes = nullptr;
+  HRESULT hr = MFCreateAttributes(&pAttributes, 1);
   if (SUCCEEDED(hr)) {
     hr = pAttributes->SetGUID(
         MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
         MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
   }
 
-  // Enumerate devices.
   if (SUCCEEDED(hr)) {
     hr = MFEnumDeviceSources(pAttributes, &m_ppDevices, &m_cDevices);
   }
@@ -140,33 +113,41 @@ HRESULT DeviceList::GetAllDevices(std::vector<std::pair<std::wstring, std::wstri
   SafeRelease(&pAttributes);
 
   if (FAILED(hr)) {
+    // keep internal state consistent on failure
+    m_cDevices = 0;
+    m_ppDevices = NULL;
     return hr;
   }
 
-  UINT32 cnt = Count();
-  for (UINT32 i = 0; i < cnt; i++) {
+  if (m_cDevices == 0 || m_ppDevices == nullptr) {
+    return S_OK;  // no devices
+  }
+
+  const UINT32 MAX_DEVICES = 256;  // safety cap
+  UINT32 toProcess = (m_cDevices < MAX_DEVICES) ? m_cDevices : MAX_DEVICES;
+
+  // Minimal loop: get strings, copy to std::wstring, free, push result.
+  for (UINT32 i = 0; i < toProcess; ++i) {
     WCHAR* pFriendly = nullptr;
     WCHAR* pSymbolic = nullptr;
+
     HRESULT hr1 = m_ppDevices[i]->GetAllocatedString(
-        MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-        &pFriendly,
-        NULL);
+        MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &pFriendly, nullptr);
     HRESULT hr2 = m_ppDevices[i]->GetAllocatedString(
-        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
-        &pSymbolic,
-        NULL);
+        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, &pSymbolic, nullptr);
 
     std::wstring friendly;
     std::wstring symbolic;
 
     if (SUCCEEDED(hr1) && pFriendly) {
       friendly.assign(pFriendly);
-      CoTaskMemFree(pFriendly);
     }
+    if (pFriendly) CoTaskMemFree(pFriendly);
+
     if (SUCCEEDED(hr2) && pSymbolic) {
       symbolic.assign(pSymbolic);
-      CoTaskMemFree(pSymbolic);
     }
+    if (pSymbolic) CoTaskMemFree(pSymbolic);
 
     outDevices.emplace_back(std::move(friendly), std::move(symbolic));
   }

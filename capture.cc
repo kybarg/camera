@@ -29,6 +29,8 @@
 // Use SDK QISearch implementation (link to SDK libs via binding.gyp)
 
 HRESULT CopyAttribute(IMFAttributes* pSrc, IMFAttributes* pDest, const GUID& key);
+// Forward declaration for ConfigureSourceReader so StartCapture can call it.
+HRESULT ConfigureSourceReader(IMFSourceReader* pReader);
 // Forward declaration for helper used to deliver samples to frame callback
 static HRESULT DeliverSampleToCallback(IMFSample* pSample, std::function<void(std::vector<uint8_t>&&)>& callback);
 
@@ -294,11 +296,134 @@ HRESULT CCapture::OnReadSample(
         goto done;
       }
     } else if (m_frameCallback) {
-      // Deliver sample to the registered frame callback (non-fatal if delivery fails)
-      HRESULT hrDel = DeliverSampleToCallback(pSample, m_frameCallback);
-      if (FAILED(hrDel)) {
-        // don't fail the capture for callback delivery errors
+      // Deliver sample to the registered frame callback with format conversion
+      IMFMediaType* pType = NULL;
+      GUID subtype = {0};
+      UINT32 width = 0, height = 0;
+
+      if (SUCCEEDED(m_pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType)) && pType) {
+        pType->GetGUID(MF_MT_SUBTYPE, &subtype);
+        MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
       }
+
+      IMFMediaBuffer* pBuffer = NULL;
+      HRESULT hrBuf = pSample->ConvertToContiguousBuffer(&pBuffer);
+      if (SUCCEEDED(hrBuf) && pBuffer) {
+        BYTE* pData = NULL;
+        DWORD maxLen = 0, curLen = 0;
+        hrBuf = pBuffer->Lock(&pData, &maxLen, &curLen);
+        if (SUCCEEDED(hrBuf) && pData && curLen > 0) {
+          try {
+            std::vector<uint8_t> out;
+
+            if (subtype == MFVideoFormat_NV12) {
+              // NV12 -> RGBA
+              size_t expected = static_cast<size_t>(width) * height * 3 / 2;
+              if (curLen >= expected) {
+                out.resize(static_cast<size_t>(width) * height * 4);
+                const uint8_t* yPlane = pData;
+                const uint8_t* uvPlane = pData + (width * height);
+
+                for (UINT32 y = 0; y < height; ++y) {
+                  for (UINT32 x = 0; x < width; ++x) {
+                    size_t yIndex = (size_t)y * width + x;
+                    size_t uvIndex = (size_t)(y / 2) * width + (x & ~1);
+                    int Y = yPlane[yIndex];
+                    int U = uvPlane[uvIndex];
+                    int V = uvPlane[uvIndex + 1];
+
+                    int C = Y - 16;
+                    int D = U - 128;
+                    int E = V - 128;
+
+                    int R = (298 * C + 409 * E + 128) >> 8;
+                    int G = (298 * C - 100 * D - 208 * E + 128) >> 8;
+                    int B = (298 * C + 516 * D + 128) >> 8;
+
+                    if (R < 0) R = 0; else if (R > 255) R = 255;
+                    if (G < 0) G = 0; else if (G > 255) G = 255;
+                    if (B < 0) B = 0; else if (B > 255) B = 255;
+
+                    size_t outIndex = (size_t)y * width * 4 + x * 4;
+                    out[outIndex + 0] = static_cast<uint8_t>(R);
+                    out[outIndex + 1] = static_cast<uint8_t>(G);
+                    out[outIndex + 2] = static_cast<uint8_t>(B);
+                    out[outIndex + 3] = 255;
+                  }
+                }
+              }
+            } else if (subtype == MFVideoFormat_YUY2) {
+              // YUY2 packed (4 bytes per 2 pixels)
+              size_t expected = static_cast<size_t>(width) * height * 2;
+              if (curLen >= expected) {
+                out.reserve(static_cast<size_t>(width) * height * 4);
+                const uint8_t* p = pData;
+                size_t end = expected;
+                for (size_t i = 0; i + 3 < end; i += 4) {
+                  int y0 = p[i + 0];
+                  int u  = p[i + 1];
+                  int y1 = p[i + 2];
+                  int v  = p[i + 3];
+
+                  int c0 = y0 - 16;
+                  int c1 = y1 - 16;
+                  int d = u - 128;
+                  int e = v - 128;
+
+                  int r0 = (298 * c0 + 409 * e + 128) >> 8;
+                  int g0 = (298 * c0 - 100 * d - 208 * e + 128) >> 8;
+                  int b0 = (298 * c0 + 516 * d + 128) >> 8;
+
+                  int r1 = (298 * c1 + 409 * e + 128) >> 8;
+                  int g1 = (298 * c1 - 100 * d - 208 * e + 128) >> 8;
+                  int b1 = (298 * c1 + 516 * d + 128) >> 8;
+
+                  // clamp and push
+                  out.push_back(static_cast<uint8_t>(r0 < 0 ? 0 : (r0 > 255 ? 255 : r0)));
+                  out.push_back(static_cast<uint8_t>(g0 < 0 ? 0 : (g0 > 255 ? 255 : g0)));
+                  out.push_back(static_cast<uint8_t>(b0 < 0 ? 0 : (b0 > 255 ? 255 : b0)));
+                  out.push_back(255);
+
+                  out.push_back(static_cast<uint8_t>(r1 < 0 ? 0 : (r1 > 255 ? 255 : r1)));
+                  out.push_back(static_cast<uint8_t>(g1 < 0 ? 0 : (g1 > 255 ? 255 : g1)));
+                  out.push_back(static_cast<uint8_t>(b1 < 0 ? 0 : (b1 > 255 ? 255 : b1)));
+                  out.push_back(255);
+                }
+              }
+            } else if (subtype == MFVideoFormat_RGB32) {
+              // Already RGB32: copy to out
+              out.assign(pData, pData + curLen);
+            } else if (subtype == MFVideoFormat_RGB24) {
+              // RGB24: expand to RGBA
+              out.resize(static_cast<size_t>(width) * height * 4);
+              const uint8_t* src = pData;
+              for (UINT32 y = 0; y < height; ++y) {
+                for (UINT32 x = 0; x < width; ++x) {
+                  size_t srcIdx = (size_t)(y * width + x) * 3;
+                  size_t dstIdx = (size_t)(y * width + x) * 4;
+                  out[dstIdx + 0] = src[srcIdx + 0];
+                  out[dstIdx + 1] = src[srcIdx + 1];
+                  out[dstIdx + 2] = src[srcIdx + 2];
+                  out[dstIdx + 3] = 255;
+                }
+              }
+            } else {
+              // Unknown subtype: pass raw buffer
+              out.assign(pData, pData + curLen);
+            }
+
+            if (!out.empty()) {
+              m_frameCallback(std::move(out));
+            }
+
+          } catch (...) {
+            // ignore conversion errors
+          }
+        }
+        pBuffer->Unlock();
+      }
+      SafeRelease(&pBuffer);
+      SafeRelease(&pType);
     }
   }
 
@@ -413,21 +538,12 @@ HRESULT CCapture::StartCapture(
     if (m_pWriter) {
       hr = ConfigureCapture(param);
     } else {
-      // Attempt to set the reader output subtype to RGB32. This requests
-      // the source reader to perform color conversion if required.
-      IMFMediaType* pCurrent = NULL;
-      hr = m_pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrent);
-      if (SUCCEEDED(hr) && pCurrent) {
-        // Try to set subtype to RGB32 for delivered samples
-        hr = pCurrent->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-        if (SUCCEEDED(hr)) {
-          hr = m_pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pCurrent);
-        }
-      }
-      SafeRelease(&pCurrent);
-      // Non-fatal: if the reader cannot provide RGB32, continue and let
-      // the callback handle whatever format is produced.
-      if (FAILED(hr)) {
+      // Prefer RGB32 by asking ConfigureSourceReader to set the reader's
+      // output type. ConfigureSourceReader will try RGB32 first and fall
+      // back to other supported formats.
+      HRESULT hrCfg = ConfigureSourceReader(m_pReader);
+      if (FAILED(hrCfg)) {
+        // Non-fatal: continue with whatever format the reader provides.
         hr = S_OK;
       }
     }
@@ -603,6 +719,19 @@ HRESULT ConfigureSourceReader(IMFSourceReader* pReader) {
   // If the source's native format matches any of the formats in
   // the list, prefer the native format.
 
+  // Register the color converter MFT locally so the source reader can
+  // use it to convert to RGB32 if available.
+  // This is safe to call multiple times.
+  MFTRegisterLocalByCLSID(
+      __uuidof(CColorConvertDMO),
+      MFT_CATEGORY_VIDEO_PROCESSOR,
+      L"",
+      MFT_ENUM_FLAG_SYNCMFT,
+      0,
+      NULL,
+      0,
+      NULL);
+
   // Note: The camera might support multiple output formats,
   // including a range of frame dimensions. The application could
   // provide a list to the user and have the user select the
@@ -622,6 +751,36 @@ HRESULT ConfigureSourceReader(IMFSourceReader* pReader) {
 
   if (FAILED(hr)) {
     goto done;
+  }
+
+  // First, attempt to set an explicit RGB32 output type copied from the
+  // native attributes (frame size/frame rate). This makes RGB32 the
+  // preferred output when the source reader can perform the conversion.
+  {
+    IMFMediaType* pRgb = NULL;
+    HRESULT hrRgb = MFCreateMediaType(&pRgb);
+    if (SUCCEEDED(hrRgb) && pRgb) {
+      hrRgb = pRgb->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+    }
+    if (SUCCEEDED(hrRgb)) {
+      hrRgb = pRgb->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+    }
+    if (SUCCEEDED(hrRgb)) hrRgb = CopyAttribute(pType, pRgb, MF_MT_FRAME_SIZE);
+    if (SUCCEEDED(hrRgb)) hrRgb = CopyAttribute(pType, pRgb, MF_MT_FRAME_RATE);
+    if (SUCCEEDED(hrRgb)) hrRgb = CopyAttribute(pType, pRgb, MF_MT_PIXEL_ASPECT_RATIO);
+
+    if (SUCCEEDED(hrRgb)) {
+      HRESULT hrSet = pReader->SetCurrentMediaType(
+          (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+          NULL,
+          pRgb);
+      if (SUCCEEDED(hrSet)) {
+        SafeRelease(&pRgb);
+        SafeRelease(&pType);
+        return S_OK;
+      }
+    }
+    SafeRelease(&pRgb);
   }
 
   for (UINT32 i = 0; i < ARRAYSIZE(subtypes); i++) {

@@ -178,10 +178,23 @@ Napi::Value Camera::ClaimDeviceAsync(const Napi::CallbackInfo& info) {
     }
 
     if (SUCCEEDED(hr)) {
-      auto callback = [deferred = std::move(deferred)](Napi::Env env, Napi::Function) mutable {
+      // Return claim result including the symbolic link (caller provided identifier may be friendly name or symbolic link).
+      auto callback = [deferred = std::move(deferred), identifier](Napi::Env env, Napi::Function) mutable {
         Napi::Object result = Napi::Object::New(env);
         result.Set("success", Napi::Boolean::New(env, true));
         result.Set("message", Napi::String::New(env, "Device claimed successfully"));
+        // Convert the stored wide string identifier to UTF-8 for JS return
+        std::string symUtf8;
+        if (!identifier.empty()) {
+          int len = WideCharToMultiByte(CP_UTF8, 0, identifier.c_str(), -1, NULL, 0, NULL, NULL);
+          if (len > 0) {
+            std::string tmp(len, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, identifier.c_str(), -1, &tmp[0], len, NULL, NULL);
+            if (!tmp.empty() && tmp.back() == '\0') tmp.pop_back();
+            symUtf8 = std::move(tmp);
+          }
+        }
+        result.Set("symbolicLink", Napi::String::New(env, symUtf8));
         deferred.Resolve(result);
       };
       tsfnPromise.BlockingCall(callback);
@@ -413,7 +426,6 @@ Napi::Value Camera::GetDimensions(const Napi::CallbackInfo& info) {
 
   result.Set("width", Napi::Number::New(env, w));
   result.Set("height", Napi::Number::New(env, h));
-  result.Set("frameRate", Napi::Number::New(env, fr));
   return result;
 }
 
@@ -516,7 +528,12 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
   }
 
   this->isCapturing = true;
-  deferred.Resolve(Napi::Boolean::New(env, true));
+  {
+    Napi::Object res = Napi::Object::New(env);
+    res.Set("success", Napi::Boolean::New(env, true));
+    res.Set("message", Napi::String::New(env, "Capture started"));
+    deferred.Resolve(res);
+  }
   return deferred.Promise();
 }
 
@@ -539,7 +556,10 @@ Napi::Value Camera::StopCaptureAsync(const Napi::CallbackInfo& info) {
       this->frameTsfn.Release();
       this->frameTsfn = Napi::ThreadSafeFunction();
     }
-    deferred.Resolve(Napi::Boolean::New(env, true));
+    Napi::Object res = Napi::Object::New(env);
+    res.Set("success", Napi::Boolean::New(env, true));
+    res.Set("message", Napi::String::New(env, "Capture stopped"));
+    deferred.Resolve(res);
   }
 
   return deferred.Promise();

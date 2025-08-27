@@ -84,10 +84,11 @@ class CCapture : public IMFSourceReaderCallback {
   HRESULT EndCaptureSession();
   BOOL IsCapturing();
   HRESULT CheckDeviceLost(DEV_BROADCAST_HDR* pHdr, BOOL* pbDeviceLost);
+  // Initialize internal reader from an IMFActivate without starting capture
+  HRESULT InitFromActivate(IMFActivate* pActivate);
   // Enumerate supported native media types from the active source reader (if any).
   HRESULT GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats);
-  // Enumerate supported formats by activating an IMFActivate and creating a temporary reader.
-  static HRESULT EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vector<std::tuple<UINT32, UINT32, double>>& outFormats);
+  // (EnumerateFormatsFromActivate removed; CCapture now supports InitFromActivate and GetSupportedFormats)
 
  protected:
   enum State {

@@ -64,7 +64,11 @@ HRESULT DeviceList::GetDevice(const WCHAR* identifier, IMFActivate** ppActivate)
     if (SUCCEEDED(hr)) hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
     if (SUCCEEDED(hr)) hr = MFEnumDeviceSources(pAttributes, &m_ppDevices, &m_cDevices);
     SafeRelease(&pAttributes);
-    if (FAILED(hr)) { m_cDevices = 0; m_ppDevices = nullptr; return hr; }
+    if (FAILED(hr)) {
+      m_cDevices = 0;
+      m_ppDevices = nullptr;
+      return hr;
+    }
   }
 
   if (!m_ppDevices || m_cDevices == 0) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
@@ -81,8 +85,14 @@ HRESULT DeviceList::GetDevice(const WCHAR* identifier, IMFActivate** ppActivate)
 
     bool match = (SUCCEEDED(hr1) && pFriendly && _wcsicmp(pFriendly, identifier) == 0) || (SUCCEEDED(hr2) && pSymbolic && _wcsicmp(pSymbolic, identifier) == 0);
 
-    if (pFriendly) { CoTaskMemFree(pFriendly); pFriendly = nullptr; }
-    if (pSymbolic) { CoTaskMemFree(pSymbolic); pSymbolic = nullptr; }
+    if (pFriendly) {
+      CoTaskMemFree(pFriendly);
+      pFriendly = nullptr;
+    }
+    if (pSymbolic) {
+      CoTaskMemFree(pSymbolic);
+      pSymbolic = nullptr;
+    }
 
     if (match) {
       *ppActivate = m_ppDevices[i];
@@ -405,6 +415,20 @@ HRESULT CCapture::StartCapture(
 
   SafeRelease(&pSource);
   LeaveCriticalSection(&m_critsec);
+  return hr;
+}
+
+// Initialize the CCapture instance from an IMFActivate without starting capture.
+// This creates the media source and source reader so GetSupportedFormats can
+// enumerate native types without beginning an actual capture session.
+HRESULT CCapture::InitFromActivate(IMFActivate* pActivate) {
+  if (!pActivate) return E_POINTER;
+  IMFMediaSource* pSource = NULL;
+  HRESULT hr = pActivate->ActivateObject(__uuidof(IMFMediaSource), (void**)&pSource);
+  if (SUCCEEDED(hr)) {
+    hr = OpenMediaSource(pSource);
+  }
+  if (pSource) SafeRelease(&pSource);
   return hr;
 }
 
@@ -753,79 +777,7 @@ HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, dou
 }
 
 // static
-HRESULT CCapture::EnumerateFormatsFromActivate(IMFActivate* pActivate, std::vector<std::tuple<UINT32, UINT32, double>>& outFormats) {
-  outFormats.clear();
-
-  if (!pActivate) return E_POINTER;
-
-  HRESULT hr = S_OK;
-  HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-  bool coInitialized = SUCCEEDED(hrCo);
-  HRESULT hrMF = MFStartup(MF_VERSION);
-  bool mfStarted = SUCCEEDED(hrMF);
-
-  IMFMediaSource* pSource = nullptr;
-  IMFAttributes* pAttributes = nullptr;
-  IMFSourceReader* pReader = nullptr;
-
-  hr = pActivate->ActivateObject(__uuidof(IMFMediaSource), (void**)&pSource);
-  if (SUCCEEDED(hr)) {
-    hr = MFCreateAttributes(&pAttributes, 1);
-  }
-  if (SUCCEEDED(hr)) {
-    hr = pAttributes->SetUnknown(MF_SOURCE_READER_ASYNC_CALLBACK, NULL);
-  }
-  if (SUCCEEDED(hr)) {
-    hr = MFCreateSourceReaderFromMediaSource(pSource, pAttributes, &pReader);
-  }
-
-  std::vector<std::tuple<UINT32, UINT32, double>> temp;
-
-  if (SUCCEEDED(hr) && pReader) {
-    DWORD index = 0;
-    while (true) {
-      IMFMediaType* pType = NULL;
-      HRESULT hrType = pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
-      if (FAILED(hrType)) break;
-
-      UINT32 width = 0, height = 0;
-      UINT32 num = 0, denom = 0;
-
-      MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
-      MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
-      double frameRate = 0.0;
-      if (denom != 0) frameRate = static_cast<double>(num) / static_cast<double>(denom);
-
-      temp.emplace_back(width, height, frameRate);
-
-      SafeRelease(&pType);
-      ++index;
-    }
-  }
-
-  if (pReader) SafeRelease(&pReader);
-  if (pAttributes) SafeRelease(&pAttributes);
-  if (pSource) SafeRelease(&pSource);
-  if (mfStarted) MFShutdown();
-  if (coInitialized) CoUninitialize();
-
-  // Sort and deduplicate
-  std::sort(temp.begin(), temp.end(), [](const auto& a, const auto& b) {
-    if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
-    if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
-    return std::get<2>(a) < std::get<2>(b);
-  });
-
-  const double eps = 1e-6;
-  auto last = std::unique(temp.begin(), temp.end(), [eps](const auto& a, const auto& b) {
-    return std::get<0>(a) == std::get<0>(b) && std::get<1>(a) == std::get<1>(b) && std::fabs(std::get<2>(a) - std::get<2>(b)) < eps;
-  });
-  temp.erase(last, temp.end());
-
-  outFormats = std::move(temp);
-
-  return hr;
-}
+// EnumerateFormatsFromActivate removed; CCapture now exposes InitFromActivate + GetSupportedFormats
 
 //-------------------------------------------------------------------
 // CopyAttribute

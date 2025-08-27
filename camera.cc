@@ -133,27 +133,46 @@ Napi::Value Camera::ClaimDeviceAsync(const Napi::CallbackInfo& info) {
       1);
 
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), identifier]() mutable {
-  HRESULT hr = S_OK;
-  // Initialize COM on this worker thread for Media Foundation/API calls.
-  HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-  bool coInitialized = SUCCEEDED(hrCo);
+    HRESULT hr = S_OK;
+    // Initialize COM on this worker thread for Media Foundation/API calls.
+    HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    bool coInitialized = SUCCEEDED(hrCo);
     IMFActivate* pActivate = nullptr;
 
     DeviceList list;
     hr = list.GetDevice(identifier.c_str(), &pActivate);
 
     if (SUCCEEDED(hr) && pActivate) {
-      // Simply assign the claimed activation. Do NOT start capture here.
       // GetDevice returns an AddRef'd IMFActivate so we can store it directly.
       this->claimedActivate = pActivate;
-      // Do not create or start a CCapture instance here — the caller can
-      // decide when to start capture using the claimed activation.
-    }
 
-    if (pActivate) {
-      // If we stored it, keep reference; otherwise release
-      if (!(this->claimedActivate == pActivate)) {
-        pActivate->Release();
+      // Create a CCapture instance and initialize its reader from the
+      // claimed activation so GetSupportedFormats can enumerate types.
+      CCapture* cap = nullptr;
+      HRESULT hrCreate = CCapture::CreateInstance(NULL, &cap);
+      if (SUCCEEDED(hrCreate) && cap) {
+        HRESULT hrInit = cap->InitFromActivate(pActivate);
+        if (SUCCEEDED(hrInit)) {
+          // Store device instance for subsequent operations
+          this->device = cap;
+        } else {
+          // Init failed: cleanup
+          cap->Release();
+          // release claimed activate as initialization failed
+          if (this->claimedActivate) {
+            this->claimedActivate->Release();
+            this->claimedActivate = nullptr;
+          }
+          hr = hrInit;
+        }
+      } else {
+        // Could not create CCapture instance
+        if (cap) cap->Release();
+        if (this->claimedActivate) {
+          this->claimedActivate->Release();
+          this->claimedActivate = nullptr;
+        }
+        hr = hrCreate;
       }
     }
 
@@ -239,16 +258,14 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
 
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
     try {
-    std::vector<std::tuple<UINT32, UINT32, double>> formats;
+      std::vector<std::tuple<UINT32, UINT32, double>> formats;
       HRESULT hr = S_OK;
 
       if (this->device != nullptr) {
         hr = this->device->GetSupportedFormats(formats);
-      } else if (this->claimedActivate != nullptr) {
-        hr = CCapture::EnumerateFormatsFromActivate(this->claimedActivate, formats);
       } else {
         auto callback = [deferred = std::move(deferred)](Napi::Env env, Napi::Function) mutable {
-          deferred.Reject(Napi::Error::New(env, "No active capture device and no claimed device to enumerate formats from").Value());
+          deferred.Reject(Napi::Error::New(env, "No initialized device. Call claimDeviceAsync first to initialize the device before enumerating formats.").Value());
         };
         tsfnPromise.BlockingCall(callback);
         tsfnPromise.Release();
@@ -265,14 +282,14 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
         return;
       }
 
-    auto callback = [deferred = std::move(deferred), formats = std::move(formats)](Napi::Env env, Napi::Function) mutable {
+      auto callback = [deferred = std::move(deferred), formats = std::move(formats)](Napi::Env env, Napi::Function) mutable {
         Napi::Array arr = Napi::Array::New(env, static_cast<uint32_t>(formats.size()));
         for (uint32_t i = 0; i < formats.size(); ++i) {
           Napi::Object obj = Napi::Object::New(env);
           obj.Set("width", Napi::Number::New(env, std::get<0>(formats[i])));
           obj.Set("height", Napi::Number::New(env, std::get<1>(formats[i])));
           obj.Set("frameRate", Napi::Number::New(env, std::get<2>(formats[i])));
-      // subtype removed; not exposing format subtype to JS
+          // subtype removed; not exposing format subtype to JS
           arr.Set(i, obj);
         }
         deferred.Resolve(arr);

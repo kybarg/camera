@@ -10,7 +10,7 @@
 #include <objbase.h>
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
-  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("startCapture", &Camera::StartCaptureAsync), InstanceMethod("stopCapture", &Camera::StopCaptureAsync)});
+  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync)});
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
   *constructor = Napi::Persistent(func);

@@ -49,7 +49,7 @@ class Camera extends EventEmitter {
 
     try {
       // Pass the frame event emitter to the native method
-      const result = await this._nativeCamera.startCapture(
+      const result = await this._nativeCamera.startCaptureAsync(
         this._frameEventEmitter
       );
       return result;
@@ -63,7 +63,7 @@ class Camera extends EventEmitter {
   async stopCapture() {
     this._isCapturing = false;
     try {
-      const result = await this._nativeCamera.stopCapture();
+      const result = await this._nativeCamera.stopCaptureAsync();
       return result;
     } catch (error) {
       throw error;

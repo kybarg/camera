@@ -11,8 +11,6 @@
 //
 //////////////////////////////////////////////////////////////////////////
 
-#include <new>
-#include <windows.h>
 #include <Dbt.h>
 #include <Wmcodecdsp.h>
 #include <assert.h>
@@ -20,6 +18,8 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <shlwapi.h>
+#include <windows.h>
+#include <new>
 
 template <class T>
 void SafeRelease(T** ppT) {
@@ -73,73 +73,82 @@ HRESULT DeviceList::EnumerateDevices() {
   return hr;
 }
 
-HRESULT DeviceList::GetDevice(UINT32 index, IMFActivate** ppActivate) {
-  if (index >= Count()) {
-    return E_INVALIDARG;
+// ... index-based GetDevice removed; use GetDevice(identifier, ppActivate) instead.
+HRESULT DeviceList::GetDevice(const WCHAR* identifier, IMFActivate** ppActivate) {
+  if (identifier == nullptr || ppActivate == nullptr) {
+    return E_POINTER;
   }
 
-  *ppActivate = m_ppDevices[index];
-  (*ppActivate)->AddRef();
-
-  return S_OK;
-}
-
-HRESULT DeviceList::GetDeviceName(UINT32 index, WCHAR** ppszName) {
-  if (index >= Count()) {
-    return E_INVALIDARG;
-  }
-
-  HRESULT hr = S_OK;
-
-  // Delegate to GetDeviceInfo for consistency when both values are needed.
-  hr = m_ppDevices[index]->GetAllocatedString(
-      MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-      ppszName,
-      NULL);
-
-  return hr;
-}
-
-HRESULT DeviceList::GetDeviceSymbolicLink(UINT32 index, WCHAR** ppszSymLink) {
-  if (index >= Count()) {
-    return E_INVALIDARG;
-  }
-
-  HRESULT hr = S_OK;
-
-  hr = m_ppDevices[index]->GetAllocatedString(
-      MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
-      ppszSymLink,
-      NULL);
-
-  return hr;
-}
-
-HRESULT DeviceList::GetDeviceInfo(UINT32 index, WCHAR** ppszName, WCHAR** ppszSymLink) {
-  if (index >= Count()) {
-    return E_INVALIDARG;
-  }
-
-  HRESULT hr = S_OK;
-
-  if (ppszName) {
-    hr = m_ppDevices[index]->GetAllocatedString(
+  for (UINT32 i = 0; i < m_cDevices; ++i) {
+    WCHAR* pFriendly = nullptr;
+    WCHAR* pSymbolic = nullptr;
+    HRESULT hr1 = m_ppDevices[i]->GetAllocatedString(
         MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-        ppszName,
+        &pFriendly,
         NULL);
-    if (FAILED(hr)) {
-      return hr;
+    HRESULT hr2 = m_ppDevices[i]->GetAllocatedString(
+        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
+        &pSymbolic,
+        NULL);
+
+    bool match = false;
+    if (SUCCEEDED(hr1) && pFriendly) {
+      if (_wcsicmp(pFriendly, identifier) == 0) {
+        match = true;
+      }
+    }
+
+    if (!match && SUCCEEDED(hr2) && pSymbolic) {
+      if (_wcsicmp(pSymbolic, identifier) == 0) {
+        match = true;
+      }
+    }
+
+    if (pFriendly) CoTaskMemFree(pFriendly);
+    if (pSymbolic) CoTaskMemFree(pSymbolic);
+
+    if (match) {
+      *ppActivate = m_ppDevices[i];
+      (*ppActivate)->AddRef();
+      return S_OK;
     }
   }
 
-  if (ppszSymLink) {
-    hr = m_ppDevices[index]->GetAllocatedString(
-        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
-        ppszSymLink,
+  return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+}
+
+HRESULT DeviceList::GetAllDevices(std::vector<std::pair<std::wstring, std::wstring>>& outDevices) {
+  outDevices.clear();
+
+  UINT32 cnt = Count();
+  for (UINT32 i = 0; i < cnt; i++) {
+    WCHAR* pFriendly = nullptr;
+    WCHAR* pSymbolic = nullptr;
+    HRESULT hr1 = m_ppDevices[i]->GetAllocatedString(
+        MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+        &pFriendly,
         NULL);
+    HRESULT hr2 = m_ppDevices[i]->GetAllocatedString(
+        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
+        &pSymbolic,
+        NULL);
+
+    std::wstring friendly;
+    std::wstring symbolic;
+
+    if (SUCCEEDED(hr1) && pFriendly) {
+      friendly.assign(pFriendly);
+      CoTaskMemFree(pFriendly);
+    }
+    if (SUCCEEDED(hr2) && pSymbolic) {
+      symbolic.assign(pSymbolic);
+      CoTaskMemFree(pSymbolic);
+    }
+
+    outDevices.emplace_back(std::move(friendly), std::move(symbolic));
   }
 
-  return hr;
+  return S_OK;
 }
 //-------------------------------------------------------------------
 //  CreateInstance

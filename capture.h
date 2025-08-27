@@ -13,11 +13,14 @@
 
 #pragma once
 
-#include <windows.h>
 #include <Dbt.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
+#include <windows.h>
+#include <string>
+#include <utility>
+#include <vector>
 
 const UINT WM_APP_PREVIEW_ERROR = WM_APP + 1;  // wparam = HRESULT
 
@@ -36,11 +39,11 @@ class DeviceList {
 
   void Clear();
   HRESULT EnumerateDevices();
-  HRESULT GetDevice(UINT32 index, IMFActivate** ppActivate);
-  HRESULT GetDeviceName(UINT32 index, WCHAR** ppszName);
-  HRESULT GetDeviceSymbolicLink(UINT32 index, WCHAR** ppszSymLink);
-  // Helper that returns both friendly name and symbolic link (allocated via CoTaskMemAlloc).
-  HRESULT GetDeviceInfo(UINT32 index, WCHAR** ppszName, WCHAR** ppszSymLink);
+  // Find and return the IMFActivate whose friendly name or symbolic link matches
+  // the provided identifier (case-insensitive). The returned IMFActivate is AddRef'd.
+  HRESULT GetDevice(const WCHAR* identifier, IMFActivate** ppActivate);
+  // Returns a vector of (friendlyName, symbolicLink) copied into std::wstring
+  HRESULT GetAllDevices(std::vector<std::pair<std::wstring, std::wstring>>& outDevices);
 };
 
 struct EncodingParameters {

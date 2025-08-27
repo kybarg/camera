@@ -89,7 +89,7 @@ class CCapture : public IMFSourceReaderCallback {
     return S_OK;
   }
 
-  HRESULT StartCapture(IMFActivate* pActivate, const WCHAR* pwszFileName, const EncodingParameters& param);
+  HRESULT StartCapture(IMFActivate* pActivate, const EncodingParameters& param);
   HRESULT EndCaptureSession();
   BOOL IsCapturing();
   HRESULT CheckDeviceLost(DEV_BROADCAST_HDR* pHdr, BOOL* pbDeviceLost);

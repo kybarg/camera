@@ -668,7 +668,7 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
 
   // Start capture without file; frames will be delivered via callback
   EncodingParameters params = {0, 0};
-  HRESULT hr = this->device->StartCapture(this->claimedActivate, NULL, params);
+  HRESULT hr = this->device->StartCapture(this->claimedActivate, params);
   if (FAILED(hr)) {
     // cleanup TSFN
     if (this->frameTsfn) {

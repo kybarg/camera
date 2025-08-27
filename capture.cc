@@ -356,9 +356,8 @@ HRESULT CCapture::OpenMediaSource(IMFMediaSource* pSource) {
 //-------------------------------------------------------------------
 
 HRESULT CCapture::StartCapture(
-    IMFActivate* pActivate,
-    const WCHAR* pwszFileName,
-    const EncodingParameters& param) {
+  IMFActivate* pActivate,
+  const EncodingParameters& param) {
   HRESULT hr = S_OK;
 
   IMFMediaSource* pSource = NULL;
@@ -401,17 +400,9 @@ HRESULT CCapture::StartCapture(
     }
   }
 
-  // Create the sink writer
+  // We don't write to files in this build; operate in callback-only mode.
   if (SUCCEEDED(hr)) {
-    if (pwszFileName) {
-      hr = MFCreateSinkWriterFromURL(
-          pwszFileName,
-          NULL,
-          NULL,
-          &m_pWriter);
-    } else {
-      m_pWriter = NULL;
-    }
+    m_pWriter = NULL;
   }
 
   // Set up the encoding parameters. Only configure the sink writer when

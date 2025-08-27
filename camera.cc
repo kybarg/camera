@@ -1,11 +1,12 @@
 #include "camera.h"
 #include <comdef.h>
+#include <windows.h>
 #include <thread>
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
   Napi::Function func = DefineClass(env, "Camera", {
-                                                       InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync)
-                                                       //, InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync)
+                                                       InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync)
+                                                       //, InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync)
                                                    });
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
@@ -17,11 +18,26 @@ Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
 }
 
 Camera::Camera(const Napi::CallbackInfo& info)
-  : Napi::ObjectWrap<Camera>(info), device(nullptr) {
+    : Napi::ObjectWrap<Camera>(info), device(nullptr) {
   Napi::Env env = info.Env();
 }
 
-Camera::~Camera() = default;
+Camera::~Camera() {
+  if (claimedActivate) {
+    claimedActivate->Release();
+    claimedActivate = nullptr;
+  }
+  if (device) {
+    device->EndCaptureSession();
+    device->Release();
+    device = nullptr;
+  }
+  if (!claimedTempFile.empty()) {
+    // Delete the temporary sink file created when claiming the device
+    DeleteFileW(claimedTempFile.c_str());
+    claimedTempFile.clear();
+  }
+}
 
 Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
@@ -43,32 +59,32 @@ Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
       // Get all devices using the capture DeviceList API (GetAllDevices now enumerates)
       DeviceList list;
       std::vector<std::pair<std::wstring, std::wstring>> devicesVec;
-      HRESULT hr2 = list.GetAllDevices(devicesVec);
-      if (SUCCEEDED(hr2)) {
+      HRESULT hr = list.GetAllDevices(devicesVec);
+      if (SUCCEEDED(hr)) {
         auto callback = [deferred = std::move(deferred), devicesVec = std::move(devicesVec)](Napi::Env env, Napi::Function) mutable {
-            Napi::Array devices = Napi::Array::New(env, static_cast<uint32_t>(devicesVec.size()));
+          Napi::Array devices = Napi::Array::New(env, static_cast<uint32_t>(devicesVec.size()));
 
-            for (uint32_t i = 0; i < devicesVec.size(); ++i) {
-              Napi::Object deviceInfo = Napi::Object::New(env);
-              const auto& pair = devicesVec[i];
+          for (uint32_t i = 0; i < devicesVec.size(); ++i) {
+            Napi::Object deviceInfo = Napi::Object::New(env);
+            const auto& pair = devicesVec[i];
 
-              // Convert std::wstring to std::u16string for N-API
-              std::u16string friendlyU16(pair.first.begin(), pair.first.end());
-              std::u16string symbolicU16(pair.second.begin(), pair.second.end());
+            // Convert std::wstring to std::u16string for N-API
+            std::u16string friendlyU16(pair.first.begin(), pair.first.end());
+            std::u16string symbolicU16(pair.second.begin(), pair.second.end());
 
-              deviceInfo.Set("friendlyName", Napi::String::New(env, friendlyU16));
-              deviceInfo.Set("symbolicLink", Napi::String::New(env, symbolicU16));
+            deviceInfo.Set("friendlyName", Napi::String::New(env, friendlyU16));
+            deviceInfo.Set("symbolicLink", Napi::String::New(env, symbolicU16));
 
-              devices.Set(i, deviceInfo);
-            }
+            devices.Set(i, deviceInfo);
+          }
 
-            deferred.Resolve(devices);
-          };
+          deferred.Resolve(devices);
+        };
 
         tsfnPromise.BlockingCall(callback);
       } else {
-        auto callback = [deferred = std::move(deferred), hr2](Napi::Env env, Napi::Function) mutable {
-          _com_error err(hr2);
+        auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
+          _com_error err(hr);
           LPCTSTR errMsg = err.ErrorMessage();
           std::string message = errMsg;
           deferred.Reject(Napi::Error::New(env, message).Value());
@@ -90,68 +106,122 @@ Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
   return deferred.Promise();
 }
 
-// Napi::Value Camera::ClaimDeviceAsync(const Napi::CallbackInfo& info) {
-//   Napi::Env env = info.Env();
+Napi::Value Camera::ClaimDeviceAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
 
-//   if (info.Length() < 1 || !info[0].IsString()) {
-//     Napi::TypeError::New(env, "Expected device symbolic link as string").ThrowAsJavaScriptException();
-//     return env.Null();
-//   }
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected device identifier (friendlyName or symbolicLink) as string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
 
-//   std::u16string symbolicLinkU16 = info[0].As<Napi::String>().Utf16Value();
-//   std::wstring symbolicLink(symbolicLinkU16.begin(), symbolicLinkU16.end());
+  std::u16string idU16 = info[0].As<Napi::String>().Utf16Value();
+  std::wstring identifier(idU16.begin(), idU16.end());
 
-//   // Create a promise
-//   auto deferred = Napi::Promise::Deferred::New(env);
+  auto deferred = Napi::Promise::Deferred::New(env);
 
-//   // Create thread-safe function for the promise resolution
-//   auto tsfnPromise = Napi::ThreadSafeFunction::New(
-//       env,
-//       Napi::Function(),
-//       "ClaimDeviceAsync",
-//       0,
-//       1);
+  auto tsfnPromise = Napi::ThreadSafeFunction::New(
+      env,
+      Napi::Function(),
+      "ClaimDeviceAsync",
+      0,
+      1);
 
-//   // Start async operation
-//   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), symbolicLink]() mutable {
-//     try {
-//       HRESULT hr = device.SelectDeviceBySymbolicLink(symbolicLink);
+  std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), identifier]() mutable {
+  HRESULT hr = S_OK;
+  // Initialize COM on this worker thread for Media Foundation/API calls.
+  HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+  bool coInitialized = SUCCEEDED(hrCo);
+    IMFActivate* pActivate = nullptr;
 
-//       if (SUCCEEDED(hr)) {
-//         auto callback = [deferred = std::move(deferred), symbolicLink](Napi::Env env, Napi::Function) mutable {
-//           Napi::Object result = Napi::Object::New(env);
-//           result.Set("success", Napi::Boolean::New(env, true));
-//           result.Set("message", Napi::String::New(env, "Device claimed successfully"));
-//           // Convert std::wstring to std::u16string for N-API
-//           std::u16string symbolicU16(symbolicLink.begin(), symbolicLink.end());
-//           result.Set("symbolicLink", Napi::String::New(env, symbolicU16));
-//           deferred.Resolve(result);
-//         };
+    DeviceList list;
+    hr = list.GetDevice(identifier.c_str(), &pActivate);
 
-//         tsfnPromise.BlockingCall(callback);
-//       } else {
-//         auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
-//           _com_error err(hr);
-//           LPCTSTR errMsg = err.ErrorMessage();
-//           std::string message = errMsg;
-//           deferred.Reject(Napi::Error::New(env, message).Value());
-//         };
+    if (SUCCEEDED(hr) && pActivate) {
+      // Create CCapture instance and start capture to NUL (no file) to claim device
+      CCapture* pCapture = nullptr;
+      hr = CCapture::CreateInstance(NULL, &pCapture);
+      if (SUCCEEDED(hr) && pCapture) {
+        EncodingParameters params = {MFVideoFormat_NV12, 1000000};
+        // Create a temporary file path for the sink writer. Using "nul"
+        // can cause parameter errors for MFCreateSinkWriterFromURL.
+        WCHAR tmpPath[MAX_PATH];
+        WCHAR tmpFile[MAX_PATH];
+        DWORD len = GetTempPathW(MAX_PATH, tmpPath);
+        if (len > 0 && len < MAX_PATH) {
+          // Create a unique filename with .wmv extension which MF sink writer
+          // usually recognizes.
+          unsigned long long ticks = GetTickCount64();
+          std::wstring base(tmpPath);
+          if (!base.empty() && base.back() != L'\\' && base.back() != L'/') base.push_back(L'\\');
+          swprintf_s(tmpFile, MAX_PATH, L"%scamera_claim_%llu.wmv", base.c_str(), ticks);
+          // Store the temp file path to delete later
+          this->claimedTempFile = tmpFile;
+          hr = pCapture->StartCapture(pActivate, tmpFile, params);
+        } else {
+          hr = E_FAIL;
+        }
+        if (SUCCEEDED(hr)) {
+          // store the claimed activation so other calls can release later
+          this->claimedActivate = pActivate;
+          // also keep device instance pointer
+          this->device = pCapture;
+        } else {
+          pCapture->Release();
+        }
+      }
+    }
 
-//         tsfnPromise.BlockingCall(callback);
-//       }
-//     } catch (const std::exception& e) {
-//       auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
-//         deferred.Reject(Napi::Error::New(env, message).Value());
-//       };
+    if (pActivate) {
+      // If we stored it, keep reference; otherwise release
+      if (!(this->claimedActivate == pActivate)) {
+        pActivate->Release();
+      }
+    }
 
-//       tsfnPromise.BlockingCall(callback);
-//     }
+    if (coInitialized) {
+      CoUninitialize();
+    }
 
-//     tsfnPromise.Release();
-//   }).detach();
+    if (SUCCEEDED(hr)) {
+      auto callback = [deferred = std::move(deferred)](Napi::Env env, Napi::Function) mutable {
+        Napi::Object result = Napi::Object::New(env);
+        result.Set("success", Napi::Boolean::New(env, true));
+        result.Set("message", Napi::String::New(env, "Device claimed successfully"));
+        deferred.Resolve(result);
+      };
+      tsfnPromise.BlockingCall(callback);
+    } else {
+      auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
+        _com_error err(hr);
+        LPCTSTR errMsg = err.ErrorMessage();
+        std::string messageBody;
+#ifdef UNICODE
+        if (errMsg) {
+          int len = WideCharToMultiByte(CP_UTF8, 0, errMsg, -1, NULL, 0, NULL, NULL);
+          if (len > 0) {
+            std::string tmp(len, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, errMsg, -1, &tmp[0], len, NULL, NULL);
+            // remove trailing null
+            if (!tmp.empty() && tmp.back() == '\0') tmp.pop_back();
+            messageBody = tmp;
+          }
+        }
+#else
+        if (errMsg) messageBody = errMsg;
+#endif
+        char header[64];
+        sprintf_s(header, sizeof(header), "HRESULT=0x%08X: ", (unsigned)hr);
+        std::string message = std::string(header) + messageBody;
+        deferred.Reject(Napi::Error::New(env, message).Value());
+      };
+      tsfnPromise.BlockingCall(callback);
+    }
 
-//   return deferred.Promise();
-// }
+    tsfnPromise.Release();
+  }).detach();
+
+  return deferred.Promise();
+}
 
 // Napi::Value Camera::ReleaseDeviceAsync(const Napi::CallbackInfo& info) {
 //   Napi::Env env = info.Env();

@@ -54,6 +54,27 @@ HRESULT DeviceList::GetDevice(const WCHAR* identifier, IMFActivate** ppActivate)
     return E_POINTER;
   }
 
+  // If we haven't enumerated yet, do a fresh enumeration so callers
+  // can use GetDevice() without first calling GetAllDevices().
+  if (m_cDevices == 0) {
+    IMFAttributes* pAttributes = NULL;
+    HRESULT hr = MFCreateAttributes(&pAttributes, 1);
+    if (SUCCEEDED(hr)) {
+      hr = pAttributes->SetGUID(
+          MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+          MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+    }
+
+    if (SUCCEEDED(hr)) {
+      hr = MFEnumDeviceSources(pAttributes, &m_ppDevices, &m_cDevices);
+    }
+
+    SafeRelease(&pAttributes);
+    if (FAILED(hr)) {
+      return hr;
+    }
+  }
+
   for (UINT32 i = 0; i < m_cDevices; ++i) {
     WCHAR* pFriendly = nullptr;
     WCHAR* pSymbolic = nullptr;

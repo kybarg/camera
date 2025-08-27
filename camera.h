@@ -11,9 +11,11 @@ class Camera : public Napi::ObjectWrap<Camera> {
   ~Camera();
 
   CCapture* device;
+  IMFActivate* claimedActivate = nullptr;
+  std::wstring claimedTempFile;
 
   Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);
-  // Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);
+  Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);
   // Napi::Value ReleaseDeviceAsync(const Napi::CallbackInfo& info);
   // Napi::Value StartCaptureAsync(const Napi::CallbackInfo& info);
   // Napi::Value StopCaptureAsync(const Napi::CallbackInfo& info);

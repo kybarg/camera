@@ -14,7 +14,14 @@ Napi::Object InitAll(Napi::Env env, Napi::Object exports) {
     atexit(MfCleanup);
   }
 
-  return Camera::Init(env, exports);
+  Napi::Object camExports = Camera::Init(env, exports);
+
+  // Register bench exports if available
+  // bench.BenchInit is declared in bench.cc
+  extern Napi::Object BenchInit(Napi::Env, Napi::Object);
+  BenchInit(env, camExports);
+
+  return camExports;
 }
 
 NODE_API_MODULE(addon, InitAll)

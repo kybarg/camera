@@ -11,7 +11,8 @@
       "sources": [
         "addon.cc",
         "camera.cc",
-        "capture.cc"
+        "capture.cc",
+        "bench.cc"
       ],
       "libraries": [
         "-lmf",

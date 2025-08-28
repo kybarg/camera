@@ -85,15 +85,27 @@ Value RunRgb32Bench(const CallbackInfo& info) {
     if (msOpt24 < best24Opt) best24Opt = msOpt24;
   }
 
+  // RGB24 SIMD benchmark (if available)
+  double best24Simd = 1e99;
+  // warm up
+  simd_rgb24_to_rgba(src24.data(), dst24.data(), pixels);
+  for (int r = 0; r < repeat; ++r) {
+    auto t0s = std::chrono::high_resolution_clock::now();
+    for (int it = 0; it < iterations; ++it) simd_rgb24_to_rgba(src24.data(), dst24.data(), pixels);
+    auto t1s = std::chrono::high_resolution_clock::now();
+    double msSimd24 = std::chrono::duration<double, std::milli>(t1s - t0s).count();
+    if (msSimd24 < best24Simd) best24Simd = msSimd24;
+  }
+
   // Build cpu object first so it appears first when serialized in JS
   Object cpu = Object::New(env);
-  cpu.Set("avx2", Boolean::New(env, has_avx2()));
-  cpu.Set("ssse3", Boolean::New(env, has_ssse3()));
-  cpu.Set("sse2", Boolean::New(env, has_sse2()));
-  cpu.Set("sse3", Boolean::New(env, has_sse3()));
-  cpu.Set("sse4_1", Boolean::New(env, has_sse41()));
-  cpu.Set("avx", Boolean::New(env, has_avx()));
-  cpu.Set("bmi2", Boolean::New(env, has_bmi2()));
+  cpu.Set("avx2", Boolean::New(env, cpu_has_avx2()));
+  cpu.Set("ssse3", Boolean::New(env, cpu_has_ssse3()));
+  cpu.Set("sse2", Boolean::New(env, cpu_has_sse2()));
+  cpu.Set("sse3", Boolean::New(env, cpu_has_sse3()));
+  cpu.Set("sse4_1", Boolean::New(env, cpu_has_sse41()));
+  cpu.Set("avx", Boolean::New(env, cpu_has_avx()));
+  cpu.Set("bmi2", Boolean::New(env, cpu_has_bmi2()));
 
   Object result = Object::New(env);
   result.Set("cpu", cpu);
@@ -106,6 +118,7 @@ Value RunRgb32Bench(const CallbackInfo& info) {
   // RGB24 timings
   result.Set("rgb24_baseline_ms", Number::New(env, best24Base));
   result.Set("rgb24_optimized_ms", Number::New(env, best24Opt));
+  result.Set("rgb24_simd_ms", Number::New(env, best24Simd));
   return result;
 }
 

@@ -6,6 +6,7 @@
 // RGB24 (BGR24) -> RGBA conversion helpers
 void baseline_rgb24_to_rgba(const uint8_t* src, uint8_t* dst, size_t pixels);
 void optimized_rgb24_to_rgba(const uint8_t* src, uint8_t* dst, size_t pixels);
+void simd_rgb24_to_rgba(const uint8_t* src, uint8_t* dst, size_t pixels);
 
 // RGB32 (BGRA) -> RGBA conversion helpers
 void baseline_rgb32_to_rgba(const uint8_t* src, uint8_t* dst, size_t pixels);

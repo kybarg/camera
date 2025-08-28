@@ -386,65 +386,16 @@ HRESULT CCapture::OnReadSample(
                   }
                 }
               }
-            } else if (subtype == MFVideoFormat_YUY2) {
-              // Optimized YUY2 -> RGBA: work with contiguous output and write directly
-              size_t expected = static_cast<size_t>(width) * height * 2;
-              if (curLen >= expected) {
-                out.resize(static_cast<size_t>(width) * height * 4);
-                const uint8_t* p = pData;
-                const size_t end = expected;
-                uint8_t* dst = out.data();
-
-                auto clamp = [](int v) -> uint8_t { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); };
-
-                for (size_t i = 0; i + 3 < end; i += 4) {
-                  int y0 = p[i + 0];
-                  int u = p[i + 1];
-                  int y1 = p[i + 2];
-                  int v = p[i + 3];
-
-                  int c0 = y0 - 16;
-                  int c1 = y1 - 16;
-                  int d = u - 128;
-                  int e = v - 128;
-
-                  int r0 = (298 * c0 + 409 * e + 128) >> 8;
-                  int g0 = (298 * c0 - 100 * d - 208 * e + 128) >> 8;
-                  int b0 = (298 * c0 + 516 * d + 128) >> 8;
-
-                  int r1 = (298 * c1 + 409 * e + 128) >> 8;
-                  int g1 = (298 * c1 - 100 * d - 208 * e + 128) >> 8;
-                  int b1 = (298 * c1 + 516 * d + 128) >> 8;
-
-                  *dst++ = clamp(r0);
-                  *dst++ = clamp(g0);
-                  *dst++ = clamp(b0);
-                  *dst++ = 255;
-
-                  *dst++ = clamp(r1);
-                  *dst++ = clamp(g1);
-                  *dst++ = clamp(b1);
-                  *dst++ = 255;
-                }
-              }
+            } else if (subtype == MFVideoFormat_RGB24) {
+              // RGB24 (BGR24) -> RGBA using shared conversion helper (may use SIMD)
+              size_t pixels = static_cast<size_t>(width) * height;
+              out.resize(pixels * 4);
+              simd_rgb24_to_rgba(reinterpret_cast<const uint8_t*>(pData), out.data(), pixels);
             } else if (subtype == MFVideoFormat_RGB32) {
               // Use shared conversion helpers: simdRgb will pick fastest available
               size_t pixels = curLen / 4;
               out.resize(pixels * 4);
               simd_rgb32_to_rgba(reinterpret_cast<const uint8_t*>(pData), out.data(), pixels);
-            } else if (subtype == MFVideoFormat_RGB24) {
-              // RGB24 (BGR24) -> RGBA. Assemble 32-bit words and write sequentially.
-              size_t pixels = static_cast<size_t>(width) * height;
-              out.resize(pixels * 4);
-              const uint8_t* src = pData;
-              uint32_t* dst32 = reinterpret_cast<uint32_t*>(out.data());
-
-              for (size_t i = 0; i < pixels; ++i) {
-                uint32_t b = src[i * 3 + 0];
-                uint32_t g = src[i * 3 + 1];
-                uint32_t r = src[i * 3 + 2];
-                dst32[i] = (r) | (g << 8) | (b << 16) | (0xFFu << 24);
-              }
             } else {
               // Unknown subtype: pass raw buffer
               out.assign(pData, pData + curLen);

@@ -262,3 +262,101 @@ void simd_rgb32_to_rgba(const uint8_t* srcBytes, uint8_t* dstBytes, size_t pixel
   // Fallback to the optimized scalar/unrolled implementation
   optimized_rgb32_to_rgba(srcBytes, dstBytes, pixels, 0, 0);
 }
+
+// SIMD BGR24 -> RGBA using AVX2/SSSE3. We load packed RGB triplets and rearrange
+// into 32-bit RGBA words. For simplicity and portability we operate on blocks
+// and fall back to optimized scalar when SIMD isn't available.
+void simd_rgb24_to_rgba(const uint8_t* src, uint8_t* dst, size_t pixels) {
+  if (pixels == 0) return;
+
+  // AVX2 path: process 8 pixels (24 bytes per 8 pixels = 192 bytes) in a loop
+  if (cpu_has_avx2()) {
+    // AVX2 path: process 8 pixels (24 bytes input -> 32 bytes output) per loop
+    const uint8_t* s = src;
+    uint8_t* d = dst;
+    size_t totalBytes = pixels * 3;
+    size_t processedPixels = 0;
+    size_t offset = 0; // bytes consumed from src
+
+    // Shuffle mask: for each 128-bit lane (16 bytes) we expand 4 pixels -> 16 output bytes
+    const __m256i shuffle_mask = _mm256_setr_epi8(
+        // low 128-bit lane (pixels 0..3): r,g,b,alpha_placeholder for each
+        2, 1, 0, (char)0x80, 5, 4, 3, (char)0x80, 8, 7, 6, (char)0x80, 11, 10, 9, (char)0x80,
+        // high 128-bit lane (pixels 4..7)
+        14, 13, 12, (char)0x80, 17, 16, 15, (char)0x80, 20, 19, 18, (char)0x80, 23, 22, 21, (char)0x80
+    );
+    const __m256i alpha_mask = _mm256_set1_epi32(0xFF000000u);
+
+    // We will load 32 bytes at a time but only when we have at least 32 src bytes available.
+    // Each loop consumes 24 source bytes (8 pixels). We avoid overruns by checking bytes remaining.
+    while (processedPixels + 8 <= pixels && (totalBytes - offset) >= 32) {
+      const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(s + offset));
+      const __m256i sh = _mm256_shuffle_epi8(v, shuffle_mask);
+      const __m256i out = _mm256_or_si256(sh, alpha_mask);
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(d + processedPixels * 4), out);
+
+      processedPixels += 8;
+      offset += 24; // consumed 8 * 3 bytes
+    }
+
+    // fallback for remaining pixels
+    if (processedPixels < pixels) {
+      optimized_rgb24_to_rgba(s + offset, d + processedPixels * 4, pixels - processedPixels);
+    }
+    return;
+  }
+
+  if (cpu_has_ssse3()) {
+    // SSSE3 path: process 4 pixels per iteration (12 bytes -> expand to 16 bytes)
+    size_t i = 0;
+    uint32_t* d32 = reinterpret_cast<uint32_t*>(dst);
+    const uint8_t* s = src;
+    const size_t vectorPixels = pixels & ~3u;
+
+    for (; i < vectorPixels; i += 4) {
+      // Load 12 bytes into three 32-bit reads
+      uint32_t a = *(const uint32_t*)(s + 0);
+      uint32_t b = *(const uint32_t*)(s + 4);
+      uint32_t c = *(const uint32_t*)(s + 8);
+
+      // Extract bytes (little-endian): a = b0 g0 r0 ? ; but we assume src is packed
+      uint8_t b0 = (a & 0xFFu);
+      uint8_t g0 = ((a >> 8) & 0xFFu);
+      uint8_t r0 = ((a >> 16) & 0xFFu);
+
+      uint8_t b1 = (b & 0xFFu);
+      uint8_t g1 = ((b >> 8) & 0xFFu);
+      uint8_t r1 = ((b >> 16) & 0xFFu);
+
+      uint8_t b2 = (c & 0xFFu);
+      uint8_t g2 = ((c >> 8) & 0xFFu);
+      uint8_t r2 = ((c >> 16) & 0xFFu);
+
+      // The 4th pixel's bytes come from combining the high byte of c and next byte
+      uint32_t dword4bytes = *(const uint32_t*)(s + 12);
+      uint8_t b3 = (dword4bytes & 0xFFu);
+      uint8_t g3 = ((dword4bytes >> 8) & 0xFFu);
+      uint8_t r3 = ((dword4bytes >> 16) & 0xFFu);
+
+      d32[i + 0] = (r0) | (g0 << 8) | (b0 << 16) | (0xFFu << 24);
+      d32[i + 1] = (r1) | (g1 << 8) | (b1 << 16) | (0xFFu << 24);
+      d32[i + 2] = (r2) | (g2 << 8) | (b2 << 16) | (0xFFu << 24);
+      d32[i + 3] = (r3) | (g3 << 8) | (b3 << 16) | (0xFFu << 24);
+
+      s += 16; // advanced by 16 bytes read (we overlapped reads intentionally)
+    }
+
+    // tail
+    for (; i < pixels; ++i) {
+      uint8_t bb = s[0];
+      uint8_t gg = s[1];
+      uint8_t rr = s[2];
+      d32[i] = (rr) | (gg << 8) | (bb << 16) | (0xFFu << 24);
+      s += 3;
+    }
+    return;
+  }
+
+  // Fallback to scalar optimized implementation
+  optimized_rgb24_to_rgba(src, dst, pixels);
+}

@@ -746,7 +746,7 @@ Napi::Value Camera::StopCaptureAsync(const Napi::CallbackInfo& info) {
 
   // Clear the device frame callback first so internal state is reset cleanly.
   this->device->SetFrameCallback(nullptr);
-  HRESULT hr = this->device->EndCaptureInternal();
+  HRESULT hr = this->device->EndCaptureSession();
   if (FAILED(hr)) {
     deferred.Reject(Napi::Error::New(env, HResultToString(hr)).Value());
   } else {

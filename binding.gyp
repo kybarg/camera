@@ -9,9 +9,11 @@
         "-fno-exceptions"
       ],
       "sources": [
-        "addon.cc",
-        "camera.cc",
-        "capture.cc"
+  "addon.cc",
+  "camera.cc",
+  "capture.cc",
+  "bench.cc",
+  "convert.cc"
       ],
       "libraries": [
         "-lmf",

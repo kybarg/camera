@@ -25,6 +25,7 @@
 #include <new>
 
 #include "capture.h"
+#include "convert.h"
 
 // Use SDK QISearch implementation (link to SDK libs via binding.gyp)
 
@@ -317,122 +318,84 @@ HRESULT CCapture::OnReadSample(
             std::vector<uint8_t> out;
 
             if (subtype == MFVideoFormat_NV12) {
-              // NV12 -> RGBA
+              // Optimized NV12 -> RGBA conversion. Process two pixels at a time
               size_t expected = static_cast<size_t>(width) * height * 3 / 2;
               if (curLen >= expected) {
                 out.resize(static_cast<size_t>(width) * height * 4);
                 const uint8_t* yPlane = pData;
                 const uint8_t* uvPlane = pData + (width * height);
+                uint8_t* dst = out.data();
+
+                auto clamp = [](int v) -> uint8_t { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); };
 
                 for (UINT32 y = 0; y < height; ++y) {
-                  for (UINT32 x = 0; x < width; ++x) {
-                    size_t yIndex = (size_t)y * width + x;
-                    size_t uvIndex = (size_t)(y / 2) * width + (x & ~1);
-                    int Y = yPlane[yIndex];
-                    int U = uvPlane[uvIndex];
-                    int V = uvPlane[uvIndex + 1];
+                  const uint8_t* yRow = yPlane + (size_t)y * width;
+                  const uint8_t* uvRow = uvPlane + (size_t)(y / 2) * width;
 
-                    int C = Y - 16;
+                  UINT32 x = 0;
+                  for (; x + 1 < width; x += 2) {
+                    int Y0 = yRow[x];
+                    int Y1 = yRow[x + 1];
+                    int uvIndex = (int)(x & ~1);
+                    int U = uvRow[uvIndex];
+                    int V = uvRow[uvIndex + 1];
+
+                    int C0 = Y0 - 16;
+                    int C1 = Y1 - 16;
                     int D = U - 128;
                     int E = V - 128;
 
-                    int R = (298 * C + 409 * E + 128) >> 8;
-                    int G = (298 * C - 100 * D - 208 * E + 128) >> 8;
-                    int B = (298 * C + 516 * D + 128) >> 8;
+                    int R0 = (298 * C0 + 409 * E + 128) >> 8;
+                    int G0 = (298 * C0 - 100 * D - 208 * E + 128) >> 8;
+                    int B0 = (298 * C0 + 516 * D + 128) >> 8;
 
-                    if (R < 0)
-                      R = 0;
-                    else if (R > 255)
-                      R = 255;
-                    if (G < 0)
-                      G = 0;
-                    else if (G > 255)
-                      G = 255;
-                    if (B < 0)
-                      B = 0;
-                    else if (B > 255)
-                      B = 255;
+                    int R1 = (298 * C1 + 409 * E + 128) >> 8;
+                    int G1 = (298 * C1 - 100 * D - 208 * E + 128) >> 8;
+                    int B1 = (298 * C1 + 516 * D + 128) >> 8;
 
-                    size_t outIndex = (size_t)y * width * 4 + x * 4;
-                    out[outIndex + 0] = static_cast<uint8_t>(R);
-                    out[outIndex + 1] = static_cast<uint8_t>(G);
-                    out[outIndex + 2] = static_cast<uint8_t>(B);
-                    out[outIndex + 3] = 255;
+                    *dst++ = clamp(R0);
+                    *dst++ = clamp(G0);
+                    *dst++ = clamp(B0);
+                    *dst++ = 255;
+
+                    *dst++ = clamp(R1);
+                    *dst++ = clamp(G1);
+                    *dst++ = clamp(B1);
+                    *dst++ = 255;
+                  }
+
+                  // handle odd pixel at end of row
+                  if (x < width) {
+                    int Y0 = yRow[x];
+                    int uvIndex = (int)(x & ~1);
+                    int U = uvRow[uvIndex];
+                    int V = uvRow[uvIndex + 1];
+
+                    int C0 = Y0 - 16;
+                    int D = U - 128;
+                    int E = V - 128;
+
+                    int R0 = (298 * C0 + 409 * E + 128) >> 8;
+                    int G0 = (298 * C0 - 100 * D - 208 * E + 128) >> 8;
+                    int B0 = (298 * C0 + 516 * D + 128) >> 8;
+
+                    *dst++ = clamp(R0);
+                    *dst++ = clamp(G0);
+                    *dst++ = clamp(B0);
+                    *dst++ = 255;
                   }
                 }
               }
-            } else if (subtype == MFVideoFormat_YUY2) {
-              // YUY2 packed (4 bytes per 2 pixels)
-              size_t expected = static_cast<size_t>(width) * height * 2;
-              if (curLen >= expected) {
-                out.reserve(static_cast<size_t>(width) * height * 4);
-                const uint8_t* p = pData;
-                size_t end = expected;
-                for (size_t i = 0; i + 3 < end; i += 4) {
-                  int y0 = p[i + 0];
-                  int u = p[i + 1];
-                  int y1 = p[i + 2];
-                  int v = p[i + 3];
-
-                  int c0 = y0 - 16;
-                  int c1 = y1 - 16;
-                  int d = u - 128;
-                  int e = v - 128;
-
-                  int r0 = (298 * c0 + 409 * e + 128) >> 8;
-                  int g0 = (298 * c0 - 100 * d - 208 * e + 128) >> 8;
-                  int b0 = (298 * c0 + 516 * d + 128) >> 8;
-
-                  int r1 = (298 * c1 + 409 * e + 128) >> 8;
-                  int g1 = (298 * c1 - 100 * d - 208 * e + 128) >> 8;
-                  int b1 = (298 * c1 + 516 * d + 128) >> 8;
-
-                  // clamp and push
-                  out.push_back(static_cast<uint8_t>(r0 < 0 ? 0 : (r0 > 255 ? 255 : r0)));
-                  out.push_back(static_cast<uint8_t>(g0 < 0 ? 0 : (g0 > 255 ? 255 : g0)));
-                  out.push_back(static_cast<uint8_t>(b0 < 0 ? 0 : (b0 > 255 ? 255 : b0)));
-                  out.push_back(255);
-
-                  out.push_back(static_cast<uint8_t>(r1 < 0 ? 0 : (r1 > 255 ? 255 : r1)));
-                  out.push_back(static_cast<uint8_t>(g1 < 0 ? 0 : (g1 > 255 ? 255 : g1)));
-                  out.push_back(static_cast<uint8_t>(b1 < 0 ? 0 : (b1 > 255 ? 255 : b1)));
-                  out.push_back(255);
-                }
-              }
+            } else if (subtype == MFVideoFormat_RGB24) {
+              // RGB24 (BGR24) -> RGBA using shared conversion helper (may use SIMD)
+              size_t pixels = static_cast<size_t>(width) * height;
+              out.resize(pixels * 4);
+              simd_rgb24_to_rgba(reinterpret_cast<const uint8_t*>(pData), out.data(), pixels);
             } else if (subtype == MFVideoFormat_RGB32) {
-              // Windows RGB32 is usually stored as BGRA (little-endian). Convert to RGBA for JS.
+              // Use shared conversion helpers: simdRgb will pick fastest available
               size_t pixels = curLen / 4;
               out.resize(pixels * 4);
-              const uint8_t* src = pData;
-              for (size_t i = 0; i < pixels; ++i) {
-                size_t s = i * 4;
-                size_t d = i * 4;
-                uint8_t b = src[s + 0];
-                uint8_t g = src[s + 1];
-                uint8_t r = src[s + 2];
-                // alpha channel may be present in src[s+3]
-                out[d + 0] = r;
-                out[d + 1] = g;
-                out[d + 2] = b;
-                out[d + 3] = 255;
-              }
-            } else if (subtype == MFVideoFormat_RGB24) {
-              // RGB24: Windows typically provides BGR24 ordering. Expand to RGBA (R,G,B,A)
-              out.resize(static_cast<size_t>(width) * height * 4);
-              const uint8_t* src = pData;
-              for (UINT32 y = 0; y < height; ++y) {
-                for (UINT32 x = 0; x < width; ++x) {
-                  size_t srcIdx = (size_t)(y * width + x) * 3;
-                  size_t dstIdx = (size_t)(y * width + x) * 4;
-                  uint8_t b = src[srcIdx + 0];
-                  uint8_t g = src[srcIdx + 1];
-                  uint8_t r = src[srcIdx + 2];
-                  out[dstIdx + 0] = r;
-                  out[dstIdx + 1] = g;
-                  out[dstIdx + 2] = b;
-                  out[dstIdx + 3] = 255;
-                }
-              }
+              simd_rgb32_to_rgba(reinterpret_cast<const uint8_t*>(pData), out.data(), pixels);
             } else {
               // Unknown subtype: pass raw buffer
               out.assign(pData, pData + curLen);

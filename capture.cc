@@ -758,19 +758,31 @@ HRESULT ConfigureSourceReader(IMFSourceReader* pReader) {
   // camera's output format. That is outside the scope of this
   // sample, however.
 
-  hr = pReader->GetNativeMediaType(
-      (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-      0,  // Type index
-      &pType);
+  // Prefer an already-set current media type (e.g. set via SetDesiredFormat).
+  // This ensures SetDesiredFormat takes effect instead of being overridden
+  // by ConfigureSourceReader enumerating native types.
+  HRESULT hrCurr = pReader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType);
+  if (SUCCEEDED(hrCurr) && pType) {
+    hr = pType->GetGUID(MF_MT_SUBTYPE, &subtype);
+    if (FAILED(hr)) {
+      goto done;
+    }
+  } else {
+    // Fall back to querying the native media type list if no current type set.
+    hr = pReader->GetNativeMediaType(
+        (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+        0,  // Type index
+        &pType);
 
-  if (FAILED(hr)) {
-    goto done;
-  }
+    if (FAILED(hr)) {
+      goto done;
+    }
 
-  hr = pType->GetGUID(MF_MT_SUBTYPE, &subtype);
+    hr = pType->GetGUID(MF_MT_SUBTYPE, &subtype);
 
-  if (FAILED(hr)) {
-    goto done;
+    if (FAILED(hr)) {
+      goto done;
+    }
   }
 
   // First, attempt to set an explicit RGB32 output type copied from the

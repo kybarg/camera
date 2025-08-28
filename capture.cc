@@ -400,19 +400,36 @@ HRESULT CCapture::OnReadSample(
                 }
               }
             } else if (subtype == MFVideoFormat_RGB32) {
-              // Already RGB32: copy to out
-              out.assign(pData, pData + curLen);
+              // Windows RGB32 is usually stored as BGRA (little-endian). Convert to RGBA for JS.
+              size_t pixels = curLen / 4;
+              out.resize(pixels * 4);
+              const uint8_t* src = pData;
+              for (size_t i = 0; i < pixels; ++i) {
+                size_t s = i * 4;
+                size_t d = i * 4;
+                uint8_t b = src[s + 0];
+                uint8_t g = src[s + 1];
+                uint8_t r = src[s + 2];
+                // alpha channel may be present in src[s+3]
+                out[d + 0] = r;
+                out[d + 1] = g;
+                out[d + 2] = b;
+                out[d + 3] = 255;
+              }
             } else if (subtype == MFVideoFormat_RGB24) {
-              // RGB24: expand to RGBA
+              // RGB24: Windows typically provides BGR24 ordering. Expand to RGBA (R,G,B,A)
               out.resize(static_cast<size_t>(width) * height * 4);
               const uint8_t* src = pData;
               for (UINT32 y = 0; y < height; ++y) {
                 for (UINT32 x = 0; x < width; ++x) {
                   size_t srcIdx = (size_t)(y * width + x) * 3;
                   size_t dstIdx = (size_t)(y * width + x) * 4;
-                  out[dstIdx + 0] = src[srcIdx + 0];
-                  out[dstIdx + 1] = src[srcIdx + 1];
-                  out[dstIdx + 2] = src[srcIdx + 2];
+                  uint8_t b = src[srcIdx + 0];
+                  uint8_t g = src[srcIdx + 1];
+                  uint8_t r = src[srcIdx + 2];
+                  out[dstIdx + 0] = r;
+                  out[dstIdx + 1] = g;
+                  out[dstIdx + 2] = b;
                   out[dstIdx + 3] = 255;
                 }
               }

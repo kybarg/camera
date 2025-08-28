@@ -2,6 +2,7 @@
 #include <immintrin.h>
 #include <intrin.h>
 #include <cstdint>
+#include <cstring>
 #include <cstddef>
 
 // CPU feature detection (Windows/MSVC)
@@ -287,16 +288,47 @@ void simd_rgb24_to_rgba(const uint8_t* src, uint8_t* dst, size_t pixels) {
     );
     const __m256i alpha_mask = _mm256_set1_epi32(0xFF000000u);
 
-    // We will load 32 bytes at a time but only when we have at least 32 src bytes available.
-    // Each loop consumes 24 source bytes (8 pixels). We avoid overruns by checking bytes remaining.
-    while (processedPixels + 8 <= pixels && (totalBytes - offset) >= 32) {
-      const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(s + offset));
+    // Each loop consumes 24 source bytes (8 pixels). Use safe loads for tail so we
+    // never read past the source buffer: when fewer than 32 bytes remain, copy to
+    // a small temp buffer and load from it.
+    while (processedPixels < pixels) {
+      size_t pixelsLeft = pixels - processedPixels;
+      size_t bytesLeft = totalBytes - offset;
+      if (pixelsLeft >= 8 && bytesLeft >= 32) {
+        // fast path: enough input to load 32 bytes safely
+        const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(s + offset));
+        const __m256i sh = _mm256_shuffle_epi8(v, shuffle_mask);
+        const __m256i out = _mm256_or_si256(sh, alpha_mask);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(d + processedPixels * 4), out);
+        processedPixels += 8;
+        offset += 24; // consumed 8 * 3 bytes
+        continue;
+      }
+
+      // tail or not enough bytes to safely load 32 bytes: use temp buffer
+      alignas(32) uint8_t tmpIn[32];
+      alignas(32) uint8_t tmpOut[32];
+      // zero pad
+      std::memset(tmpIn, 0, sizeof(tmpIn));
+      // copy available bytes (may be <32)
+      size_t toCopy = (bytesLeft < sizeof(tmpIn)) ? bytesLeft : sizeof(tmpIn);
+      if (toCopy > 0) std::memcpy(tmpIn, s + offset, toCopy);
+
+      const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(tmpIn));
       const __m256i sh = _mm256_shuffle_epi8(v, shuffle_mask);
       const __m256i out = _mm256_or_si256(sh, alpha_mask);
-      _mm256_storeu_si256(reinterpret_cast<__m256i*>(d + processedPixels * 4), out);
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmpOut), out);
 
-      processedPixels += 8;
-      offset += 24; // consumed 8 * 3 bytes
+      // how many pixels can we produce from the copied bytes?
+      size_t producedPixels = (toCopy / 3);
+      if (producedPixels == 0) break;
+      if (producedPixels > pixelsLeft) producedPixels = pixelsLeft;
+
+      // copy only produced pixels to destination
+      std::memcpy(d + processedPixels * 4, tmpOut, producedPixels * 4);
+      processedPixels += producedPixels;
+      offset += producedPixels * 3;
+      // continue loop; if still pixels remain but insufficient bytes, next iter will fill tmpIn again
     }
 
     // fallback for remaining pixels

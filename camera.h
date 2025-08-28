@@ -2,7 +2,7 @@
 #define CAMERA_H
 
 #include <napi.h>
-#include "device.h"
+#include "capture.h"
 
 class Camera : public Napi::ObjectWrap<Camera> {
  public:
@@ -10,7 +10,10 @@ class Camera : public Napi::ObjectWrap<Camera> {
   Camera(const Napi::CallbackInfo& info);
   ~Camera();
 
-  CaptureDevice device;
+  CCapture* device;
+  IMFActivate* claimedActivate = nullptr;
+  std::wstring claimedTempFile;
+  // Camera delegates supported-format and format-setting operations to CCapture
 
   Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);
   Napi::Value ClaimDeviceAsync(const Napi::CallbackInfo& info);
@@ -20,6 +23,9 @@ class Camera : public Napi::ObjectWrap<Camera> {
   Napi::Value GetDimensions(const Napi::CallbackInfo& info);
   Napi::Value GetSupportedFormatsAsync(const Napi::CallbackInfo& info);
   Napi::Value SetDesiredFormatAsync(const Napi::CallbackInfo& info);
+  // Thread-safe function used to deliver frames from native code to JS
+  Napi::ThreadSafeFunction frameTsfn;
+  bool isCapturing = false;
 };
 
 #endif

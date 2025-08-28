@@ -11,14 +11,18 @@
       "sources": [
         "addon.cc",
         "camera.cc",
-        "device.cc"
+        "capture.cc"
       ],
       "libraries": [
         "-lmf",
         "-lmfplat",
         "-lMfreadwrite",
         "-lMfuuid",
-        "-lwmcodecdspuuid"
+        "-lwmcodecdspuuid",
+        "-lole32",
+        "-luuid",
+        "-lstrmiids",
+        "-lshlwapi"
       ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")"

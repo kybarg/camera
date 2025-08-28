@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <new>
+#include <cstring>
 
 #include "capture.h"
 #include "convert.h"
@@ -194,7 +195,6 @@ HRESULT CCapture::CreateInstance(
 //-------------------------------------------------------------------
 
 CCapture::CCapture(HWND hwnd) : m_pReader(NULL),
-                                m_pWriter(NULL),
                                 m_hwndEvent(hwnd),
                                 m_nRefCount(1),
                                 m_bFirstSample(FALSE),
@@ -209,7 +209,6 @@ CCapture::CCapture(HWND hwnd) : m_pReader(NULL),
 
 CCapture::~CCapture() {
   assert(m_pReader == NULL);
-  assert(m_pWriter == NULL);
   DeleteCriticalSection(&m_critsec);
 }
 
@@ -291,12 +290,7 @@ HRESULT CCapture::OnReadSample(
     if (FAILED(hr)) {
       goto done;
     }
-    if (m_pWriter) {
-      hr = m_pWriter->WriteSample(0, pSample);
-      if (FAILED(hr)) {
-        goto done;
-      }
-    } else if (m_frameCallback) {
+    if (m_frameCallback) {
       // Deliver sample to the registered frame callback with format conversion
       IMFMediaType* pType = NULL;
       GUID subtype = {0};
@@ -489,7 +483,7 @@ HRESULT CCapture::StartCapture(
     hr = pActivate->ActivateObject(
         __uuidof(IMFMediaSource),
         (void**)&pSource);
-  // ActivateObject result in hr
+    // ActivateObject result in hr
 
     // Get the symbolic link. This is needed to handle device-
     // loss notifications. (See CheckDeviceLost.)
@@ -498,11 +492,11 @@ HRESULT CCapture::StartCapture(
           MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
           &m_pwszSymbolicLink,
           NULL);
-  // GetAllocatedString result in hr
+      // GetAllocatedString result in hr
     }
 
     if (SUCCEEDED(hr)) {
-  hr = OpenMediaSource(pSource);
+      hr = OpenMediaSource(pSource);
     }
   } else {
     // We already initialized the source reader in InitFromActivate.
@@ -520,7 +514,7 @@ HRESULT CCapture::StartCapture(
 
   // We don't write to files in this build; operate in callback-only mode.
   if (SUCCEEDED(hr)) {
-    m_pWriter = NULL;
+    // operate in callback-only mode; no sink writer
   }
 
   // Set up the encoding parameters. Only configure the sink writer when
@@ -528,17 +522,11 @@ HRESULT CCapture::StartCapture(
   // mode), request RGB32 output from the source reader so the sample
   // buffers are uncompressed and usable by the embedding (JS).
   if (SUCCEEDED(hr)) {
-    if (m_pWriter) {
-      hr = ConfigureCapture(param);
-    } else {
-      // Prefer RGB32 by asking ConfigureSourceReader to set the reader's
-      // output type. ConfigureSourceReader will try RGB32 first and fall
-      // back to other supported formats.
-  HRESULT hrCfg = ConfigureSourceReader(m_pReader);
-      if (FAILED(hrCfg)) {
-        // Non-fatal: continue with whatever format the reader provides.
-        hr = S_OK;
-      }
+    // Operate in callback-only mode; prefer RGB32 output from source reader
+    HRESULT hrCfg = ConfigureSourceReader(m_pReader);
+    if (FAILED(hrCfg)) {
+      // Non-fatal: continue with whatever format the reader provides.
+      hr = S_OK;
     }
   }
 
@@ -548,13 +536,13 @@ HRESULT CCapture::StartCapture(
 
     // Request the first video frame.
 
-  hr = m_pReader->ReadSample(
-    (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-    0,
-    NULL,
-    NULL,
-    NULL,
-    NULL);
+    hr = m_pReader->ReadSample(
+        (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+        0,
+        NULL,
+        NULL,
+        NULL,
+        NULL);
   }
 
   SafeRelease(&pSource);
@@ -606,35 +594,25 @@ HRESULT CCapture::InitFromActivate(IMFActivate* pActivate) {
 // To start another capture session, call SetCaptureFile.
 //-------------------------------------------------------------------
 
-HRESULT CCapture::EndCaptureSession() {
-  EnterCriticalSection(&m_critsec);
+HRESULT CCapture::EndCaptureSession()
+{
+    EnterCriticalSection(&m_critsec);
 
-  HRESULT hr = S_OK;
+    HRESULT hr = S_OK;
 
-  if (m_pWriter) {
-    hr = m_pWriter->Finalize();
-  }
+    SafeRelease(&m_pReader);
 
-  SafeRelease(&m_pWriter);
-  // Keep m_pReader alive to allow clean restart without re-activating the media source.
-  // The full cleanup of m_pReader will occur in ReleaseDevice().
+    LeaveCriticalSection(&m_critsec);
 
-  // Clear any registered frame callback and reset state so capture can be restarted.
-  m_frameCallback = nullptr;
-  m_rgbaBuffer.clear();
-  m_bFirstSample = TRUE;
-  m_llBaseTime = 0;
-
-  LeaveCriticalSection(&m_critsec);
-
-  return hr;
+    return hr;
 }
+
 
 BOOL CCapture::IsCapturing() {
   EnterCriticalSection(&m_critsec);
 
   // Consider us capturing if we have a writer OR a registered frame callback.
-  BOOL bIsCapturing = (m_pWriter != NULL) || (m_frameCallback != nullptr);
+  BOOL bIsCapturing = (m_frameCallback != nullptr);
 
   LeaveCriticalSection(&m_critsec);
 
@@ -836,52 +814,7 @@ done:
   return hr;
 }
 
-HRESULT ConfigureEncoder(
-    const EncodingParameters& params,
-    IMFMediaType* pType,
-    IMFSinkWriter* pWriter,
-    DWORD* pdwStreamIndex) {
-  HRESULT hr = S_OK;
-
-  IMFMediaType* pType2 = NULL;
-
-  hr = MFCreateMediaType(&pType2);
-
-  if (SUCCEEDED(hr)) {
-    hr = pType2->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = pType2->SetGUID(MF_MT_SUBTYPE, params.subtype);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = pType2->SetUINT32(MF_MT_AVG_BITRATE, params.bitrate);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = CopyAttribute(pType, pType2, MF_MT_FRAME_SIZE);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = CopyAttribute(pType, pType2, MF_MT_FRAME_RATE);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = CopyAttribute(pType, pType2, MF_MT_PIXEL_ASPECT_RATIO);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = CopyAttribute(pType, pType2, MF_MT_INTERLACE_MODE);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = pWriter->AddStream(pType2, pdwStreamIndex);
-  }
-
-  SafeRelease(&pType2);
-  return hr;
-}
+// ConfigureEncoder removed: package operates in callback-only mode (no file writer)
 
 //-------------------------------------------------------------------
 // ConfigureCapture
@@ -891,49 +824,9 @@ HRESULT ConfigureEncoder(
 //-------------------------------------------------------------------
 
 HRESULT CCapture::ConfigureCapture(const EncodingParameters& param) {
-  HRESULT hr = S_OK;
-  DWORD sink_stream = 0;
-
-  IMFMediaType* pType = NULL;
-
-  hr = ConfigureSourceReader(m_pReader);
-
-  if (SUCCEEDED(hr)) {
-    hr = m_pReader->GetCurrentMediaType(
-        (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-        &pType);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = ConfigureEncoder(param, pType, m_pWriter, &sink_stream);
-  }
-
-  if (SUCCEEDED(hr)) {
-    // Register the color converter DSP for this process, in the video
-    // processor category. This will enable the sink writer to enumerate
-    // the color converter when the sink writer attempts to match the
-    // media types.
-
-    hr = MFTRegisterLocalByCLSID(
-        __uuidof(CColorConvertDMO),
-        MFT_CATEGORY_VIDEO_PROCESSOR,
-        L"",
-        MFT_ENUM_FLAG_SYNCMFT,
-        0,
-        NULL,
-        0,
-        NULL);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = m_pWriter->SetInputMediaType(sink_stream, pType, NULL);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = m_pWriter->BeginWriting();
-  }
-
-  SafeRelease(&pType);
+  // In callback-only mode we only need to prefer RGB32 via ConfigureSourceReader
+  // and leave the source reader configured appropriately.
+  HRESULT hr = ConfigureSourceReader(m_pReader);
   return hr;
 }
 
@@ -943,21 +836,18 @@ HRESULT CCapture::ConfigureCapture(const EncodingParameters& param) {
 // Stops capture.
 //-------------------------------------------------------------------
 
-HRESULT CCapture::EndCaptureInternal() {
-  HRESULT hr = S_OK;
+HRESULT CCapture::EndCaptureInternal()
+{
+    HRESULT hr = S_OK;
 
-  if (m_pWriter) {
-    hr = m_pWriter->Finalize();
-  }
+    SafeRelease(&m_pReader);
 
-  SafeRelease(&m_pWriter);
-  SafeRelease(&m_pReader);
+    CoTaskMemFree(m_pwszSymbolicLink);
+    m_pwszSymbolicLink = NULL;
 
-  CoTaskMemFree(m_pwszSymbolicLink);
-  m_pwszSymbolicLink = NULL;
-
-  return hr;
+    return hr;
 }
+
 
 // Enumerate supported native media types from the active source reader.
 HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats) {
@@ -1003,6 +893,54 @@ HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, dou
   outFormats = std::move(temp);
   // store in internal cache as well
   m_lastSupportedFormats = outFormats;
+  return S_OK;
+}
+
+// Enumerate native media types including the subtype GUID so callers can
+// inspect whether the device supports RGB32, YUV, MJPEG, etc.
+HRESULT CCapture::GetSupportedNativeTypes(std::vector<std::tuple<GUID, UINT32, UINT32, double>>& outTypes) {
+  outTypes.clear();
+  if (m_pReader == NULL) return E_FAIL;
+
+  DWORD index = 0;
+  while (true) {
+    IMFMediaType* pType = NULL;
+    HRESULT hr = m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
+    if (FAILED(hr)) break;
+
+    GUID subtype = {0};
+    UINT32 width = 0, height = 0;
+    UINT32 num = 0, denom = 0;
+
+    pType->GetGUID(MF_MT_SUBTYPE, &subtype);
+    MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
+    MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
+    double frameRate = 0.0;
+    if (denom != 0) frameRate = static_cast<double>(num) / static_cast<double>(denom);
+
+    outTypes.emplace_back(subtype, width, height, frameRate);
+
+    SafeRelease(&pType);
+    ++index;
+  }
+
+  // Sort + unique similar to GetSupportedFormats
+  std::sort(outTypes.begin(), outTypes.end(), [](const auto& a, const auto& b) {
+    if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
+    if (std::get<2>(a) != std::get<2>(b)) return std::get<2>(a) < std::get<2>(b);
+    if (std::get<3>(a) != std::get<3>(b)) return std::get<3>(a) < std::get<3>(b);
+    // fallback: compare GUID bytes
+    const GUID& ga = std::get<0>(a);
+    const GUID& gb = std::get<0>(b);
+    return memcmp(&ga, &gb, sizeof(GUID)) < 0;
+  });
+
+  const double eps = 1e-6;
+  auto last = std::unique(outTypes.begin(), outTypes.end(), [eps](const auto& a, const auto& b) {
+    return std::get<1>(a) == std::get<1>(b) && std::get<2>(a) == std::get<2>(b) && std::fabs(std::get<3>(a) - std::get<3>(b)) < eps && memcmp(&std::get<0>(a), &std::get<0>(b), sizeof(GUID)) == 0;
+  });
+  outTypes.erase(last, outTypes.end());
+
   return S_OK;
 }
 
@@ -1073,10 +1011,7 @@ HRESULT CCapture::ReleaseDevice() {
     m_pReader->Release();
     m_pReader = nullptr;
   }
-  if (m_pWriter) {
-    m_pWriter->Release();
-    m_pWriter = nullptr;
-  }
+  // No writer member present
   if (m_pwszSymbolicLink) {
     CoTaskMemFree(m_pwszSymbolicLink);
     m_pwszSymbolicLink = nullptr;

@@ -97,6 +97,8 @@ class CCapture : public IMFSourceReaderCallback {
   HRESULT InitFromActivate(IMFActivate* pActivate);
   // Enumerate supported native media types from the active source reader (if any).
   HRESULT GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats);
+  // Enumerate native media types including subtype GUID for richer info
+  HRESULT GetSupportedNativeTypes(std::vector<std::tuple<GUID, UINT32, UINT32, double>>& outTypes);
   // Set the desired native media type on the source reader (width, height, frameRate)
   HRESULT SetDesiredFormat(UINT32 width, UINT32 height, double frameRate);
   // Get current dimensions from the source reader (width, height, frameRate)
@@ -108,6 +110,7 @@ class CCapture : public IMFSourceReaderCallback {
   // (EnumerateFormatsFromActivate removed; CCapture now supports InitFromActivate and GetSupportedFormats)
   // Release all claimed device resources and reset state
   HRESULT ReleaseDevice();
+  HRESULT EndCaptureInternal();
 
  protected:
   enum State {
@@ -126,7 +129,6 @@ class CCapture : public IMFSourceReaderCallback {
 
   HRESULT OpenMediaSource(IMFMediaSource* pSource);
   HRESULT ConfigureCapture(const EncodingParameters& param);
-  HRESULT EndCaptureInternal();
 
   long m_nRefCount;  // Reference count.
   CRITICAL_SECTION m_critsec;
@@ -134,7 +136,6 @@ class CCapture : public IMFSourceReaderCallback {
   HWND m_hwndEvent;  // Application window to receive events.
 
   IMFSourceReader* m_pReader;
-  IMFSinkWriter* m_pWriter;
 
   BOOL m_bFirstSample;
   LONGLONG m_llBaseTime;

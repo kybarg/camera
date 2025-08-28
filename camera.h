@@ -22,6 +22,7 @@ class Camera : public Napi::ObjectWrap<Camera> {
   Napi::Value StopCaptureAsync(const Napi::CallbackInfo& info);
   Napi::Value GetDimensions(const Napi::CallbackInfo& info);
   Napi::Value GetSupportedFormatsAsync(const Napi::CallbackInfo& info);
+  Napi::Value GetCameraInfoAsync(const Napi::CallbackInfo& info);
   Napi::Value SetDesiredFormatAsync(const Napi::CallbackInfo& info);
   // Thread-safe function used to deliver frames from native code to JS
   Napi::ThreadSafeFunction frameTsfn;

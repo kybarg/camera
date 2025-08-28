@@ -2,6 +2,7 @@
 #include <comdef.h>
 #include <windows.h>
 #include <thread>
+#include <cstring>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
@@ -9,8 +10,37 @@
 #include <tuple>
 #include <objbase.h>
 
+// Helper: map common media subtype GUIDs to friendly encoder names
+static std::string SubtypeGuidToName(const GUID& g) {
+  // MEDIASUBTYPE_MJPG / MFVideoFormat_MJPG GUID value (bytes: 'MJPG')
+  static const GUID MJPG_GUID = {0x47504A4D, 0x0000, 0x0010, {0x80,0x00,0x00,0xAA,0x00,0x38,0x9B,0x71}};
+
+  if (g == MFVideoFormat_RGB32) return "RGB32";
+  if (g == MFVideoFormat_RGB24) return "RGB24";
+  if (g == MFVideoFormat_NV12) return "NV12";
+  if (g == MFVideoFormat_YUY2) return "YUY2";
+  if (g == MFVideoFormat_UYVY) return "UYVY";
+  if (g == MFVideoFormat_IYUV) return "IYUV";
+  if (memcmp(&g, &MJPG_GUID, sizeof(GUID)) == 0) return "MJPEG";
+  // MJPEG is usually defined as MEDIASUBTYPE_MJPG / MFVideoFormat_MJPG
+#ifdef MFVideoFormat_MJPG
+  if (g == MFVideoFormat_MJPG) return "MJPEG";
+#endif
+  // Fallback: convert GUID to string
+  OLECHAR wsz[64];
+  StringFromGUID2(g, wsz, ARRAYSIZE(wsz));
+  int len = WideCharToMultiByte(CP_UTF8, 0, wsz, -1, NULL, 0, NULL, NULL);
+  std::string guidStr;
+  if (len > 0) {
+    guidStr.assign(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wsz, -1, &guidStr[0], len, NULL, NULL);
+    if (!guidStr.empty() && guidStr.back() == '\0') guidStr.pop_back();
+  }
+  return guidStr;
+}
+
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
-  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync)});
+  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("getCameraInfoAsync", &Camera::GetCameraInfoAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync)});
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
   *constructor = Napi::Persistent(func);
@@ -18,6 +48,147 @@ Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
 
   exports.Set("Camera", func);
   return exports;
+}
+
+Napi::Value Camera::GetCameraInfoAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  auto deferred = Napi::Promise::Deferred::New(env);
+  auto tsfnPromise = Napi::ThreadSafeFunction::New(env, Napi::Function(), "GetCameraInfoAsync", 0, 1);
+
+  std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
+    try {
+      if (!this->claimedActivate) {
+        auto cb = [deferred = std::move(deferred)](Napi::Env env, Napi::Function) mutable {
+          deferred.Reject(Napi::Error::New(env, "No claimed device. Call claimDeviceAsync first.").Value());
+        };
+        tsfnPromise.BlockingCall(cb);
+        tsfnPromise.Release();
+        return;
+      }
+
+      // Extract device-level attributes from claimedActivate
+  WCHAR* pFriendly = nullptr;
+  WCHAR* pSymbolic = nullptr;
+  std::string friendlyUtf8, symbolicUtf8;
+
+  HRESULT hr1 = this->claimedActivate->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &pFriendly, nullptr);
+  HRESULT hr2 = this->claimedActivate->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, &pSymbolic, nullptr);
+
+      if (SUCCEEDED(hr1) && pFriendly) {
+        int len = WideCharToMultiByte(CP_UTF8, 0, pFriendly, -1, NULL, 0, NULL, NULL);
+        if (len > 0) {
+          std::string tmp(len, '\0');
+          WideCharToMultiByte(CP_UTF8, 0, pFriendly, -1, &tmp[0], len, NULL, NULL);
+          if (!tmp.empty() && tmp.back() == '\0') tmp.pop_back();
+          friendlyUtf8 = std::move(tmp);
+        }
+      }
+      if (SUCCEEDED(hr2) && pSymbolic) {
+        int len = WideCharToMultiByte(CP_UTF8, 0, pSymbolic, -1, NULL, 0, NULL, NULL);
+        if (len > 0) {
+          std::string tmp(len, '\0');
+          WideCharToMultiByte(CP_UTF8, 0, pSymbolic, -1, &tmp[0], len, NULL, NULL);
+          if (!tmp.empty() && tmp.back() == '\0') tmp.pop_back();
+          symbolicUtf8 = std::move(tmp);
+        }
+      }
+
+      if (pFriendly) CoTaskMemFree(pFriendly);
+      if (pSymbolic) CoTaskMemFree(pSymbolic);
+
+      // Ask CCapture for supported native types (includes subtype GUID)
+      std::vector<std::tuple<GUID, UINT32, UINT32, double>> types;
+      HRESULT hrTypes = S_OK;
+      if (this->device) {
+        hrTypes = this->device->GetSupportedNativeTypes(types);
+      }
+
+  auto cb = [deferred = std::move(deferred), friendlyUtf8 = std::move(friendlyUtf8), symbolicUtf8 = std::move(symbolicUtf8), types = std::move(types), hrTypes](Napi::Env env, Napi::Function) mutable {
+        if (FAILED(hrTypes)) {
+          deferred.Reject(Napi::Error::New(env, "Failed to enumerate native types").Value());
+          return;
+        }
+
+        Napi::Object out = Napi::Object::New(env);
+  out.Set("friendlyName", Napi::String::New(env, friendlyUtf8));
+  out.Set("symbolicLink", Napi::String::New(env, symbolicUtf8));
+
+        // Map of encoders/formats supported (collect unique subtype GUIDs)
+        Napi::Array enc = Napi::Array::New(env);
+        std::vector<GUID> seenGuids;
+        for (size_t i = 0; i < types.size(); ++i) {
+          const GUID& g = std::get<0>(types[i]);
+          bool found = false;
+          for (const auto& sg : seenGuids) {
+            if (memcmp(&sg, &g, sizeof(GUID)) == 0) { found = true; break; }
+          }
+          if (!found) {
+            std::string name = SubtypeGuidToName(g);
+            enc.Set(enc.Length(), Napi::String::New(env, name));
+            seenGuids.push_back(g);
+          }
+        }
+
+        out.Set("encoders", enc);
+
+        // Build a single `formats` object grouped by friendly subtype name.
+        // formats = { [friendlyName]: { subtype: guidString, resolutions: [ {width,height,frameRate}, ... ] } }
+        Napi::Object formatsObj = Napi::Object::New(env);
+
+        for (size_t i = 0; i < types.size(); ++i) {
+          GUID g = std::get<0>(types[i]);
+          UINT32 w = std::get<1>(types[i]);
+          UINT32 h = std::get<2>(types[i]);
+          double fr = std::get<3>(types[i]);
+
+          // GUID string for round-tripping
+          OLECHAR wsz[64];
+          StringFromGUID2(g, wsz, ARRAYSIZE(wsz));
+          int len = WideCharToMultiByte(CP_UTF8, 0, wsz, -1, NULL, 0, NULL, NULL);
+          std::string guidStr;
+          if (len > 0) {
+            guidStr.assign(len, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, wsz, -1, &guidStr[0], len, NULL, NULL);
+            if (!guidStr.empty() && guidStr.back() == '\0') guidStr.pop_back();
+          }
+
+          // Friendly key
+          std::string friendly = SubtypeGuidToName(g);
+
+          if (!formatsObj.Has(friendly)) {
+            Napi::Object group = Napi::Object::New(env);
+            group.Set("subtype", Napi::String::New(env, guidStr));
+            group.Set("resolutions", Napi::Array::New(env));
+            formatsObj.Set(friendly, group);
+          }
+
+          Napi::Object groupObj = formatsObj.Get(friendly).As<Napi::Object>();
+          Napi::Array arr = groupObj.Get("resolutions").As<Napi::Array>();
+          uint32_t idx = arr.Length();
+          Napi::Object entry = Napi::Object::New(env);
+          entry.Set("width", Napi::Number::New(env, w));
+          entry.Set("height", Napi::Number::New(env, h));
+          entry.Set("frameRate", Napi::Number::New(env, fr));
+          arr.Set(idx, entry);
+        }
+
+        out.Set("formats", formatsObj);
+
+        deferred.Resolve(out);
+      };
+
+      tsfnPromise.BlockingCall(cb);
+    } catch (const std::exception& e) {
+      auto cb = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
+        deferred.Reject(Napi::Error::New(env, message).Value());
+      };
+      tsfnPromise.BlockingCall(cb);
+    }
+    tsfnPromise.Release();
+  }).detach();
+
+  return deferred.Promise();
 }
 
 Camera::Camera(const Napi::CallbackInfo& info)
@@ -575,7 +746,7 @@ Napi::Value Camera::StopCaptureAsync(const Napi::CallbackInfo& info) {
 
   // Clear the device frame callback first so internal state is reset cleanly.
   this->device->SetFrameCallback(nullptr);
-  HRESULT hr = this->device->EndCaptureSession();
+  HRESULT hr = this->device->EndCaptureInternal();
   if (FAILED(hr)) {
     deferred.Reject(Napi::Error::New(env, HResultToString(hr)).Value());
   } else {

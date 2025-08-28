@@ -23,6 +23,40 @@ class Camera extends EventEmitter {
     this.getSupportedFormats = this._nativeCamera.getSupportedFormatsAsync.bind(
       this._nativeCamera
     );
+    // Provide a normalized getCameraInfo that returns a single `formats` object
+    this.getCameraInfo = async () => {
+      const info = await this._nativeCamera.getCameraInfoAsync();
+
+      // If native already provides `formats`, return as-is
+      if (info && info.formats) return info;
+
+      const out = Object.assign({}, info);
+
+      try {
+        // Legacy shapes: supportedResolutionsBySubtype, supportedResolutions, resolutions
+        if (info && info.supportedResolutionsBySubtype) {
+          // If it's already grouped, map it to `formats` (keys kept)
+          out.formats = info.supportedResolutionsBySubtype;
+          return out;
+        }
+
+        const flat = info && (info.supportedResolutions || info.resolutions);
+        if (Array.isArray(flat)) {
+          const formats = {};
+          for (const r of flat) {
+            const subtype = r.subtype || '<unknown>';
+            const key = subtype;
+            if (!formats[key]) formats[key] = { subtype: subtype, resolutions: [] };
+            formats[key].resolutions.push({ width: r.width, height: r.height, frameRate: r.frameRate });
+          }
+          out.formats = formats;
+        }
+      } catch (e) {
+        // ignore and return original info
+      }
+
+      return out;
+    };
     this.setDesiredFormat = this._nativeCamera.setDesiredFormatAsync.bind(
       this._nativeCamera
     );

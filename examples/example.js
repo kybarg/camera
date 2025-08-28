@@ -39,48 +39,97 @@ async function takeCameraSnapshot() {
     const formats = await camera.getSupportedFormats();
     console.log(`✅ Found ${formats.length} supported format(s):`);
 
-    // Display first few formats for reference
-    const displayCount = Math.min(10, formats.length);
-    for (let i = 0; i < displayCount; i++) {
-      const format = formats[i];
+    // Additional: get camera info (name/model/encoders/resolutions)
+    try {
+      console.log("3.1️⃣ ℹ️ Getting camera info...");
+      const info = await camera.getCameraInfo();
+      // Native returns friendlyName, symbolicLink, model, encoders, supportedResolutions
+      const name = info.name || info.friendlyName || "<unknown>";
+      const encoders = info.encoders || [];
+      // Single canonical `formats` map: { friendlyName: { subtype, resolutions: [...] } }
+      const formats = info.formats || {};
+
+      console.log("   🔎 Camera info:");
+      console.log(`     name: ${name}`);
+      if (Array.isArray(encoders) && encoders.length) {
+        console.log(`     encoders: ${encoders.join(", ")}`);
+      } else {
+        console.log("     encoders: <none>");
+      }
+      // Print canonical formats map: list each subtype and its resolutions
+      const formatKeys = Object.keys(formats);
+      if (formatKeys.length > 0) {
+        console.log("     formats (grouped by subtype):");
+        for (const key of formatKeys) {
+          const group = formats[key] || {};
+          const res = Array.isArray(group.resolutions) ? group.resolutions : [];
+          console.log(
+            `       ${key}  (subtype=${group.subtype || "<unknown>"})`
+          );
+          if (res.length === 0) {
+            console.log("         <no resolutions>");
+            continue;
+          }
+          // Show up to 6 resolutions per subtype for brevity
+          for (const r of res.slice(0, 6)) {
+            console.log(
+              `         - ${r.width}x${r.height} @ ${r.frameRate}fps`
+            );
+          }
+          if (res.length > 6)
+            console.log(`         ... and ${res.length - 6} more`);
+        }
+      } else {
+        console.log("     formats: <none>");
+      }
+      console.log("");
+    } catch (err) {
       console.log(
-        `   📐 Format ${i + 1}: ${format.width}x${format.height} @ ${
-          format.frameRate
-        }fps`
+        "   ⚠️ getCameraInfo() failed or is not implemented on this build:",
+        err && err.message ? err.message : err
       );
+      console.log("");
     }
-    if (formats.length > displayCount) {
-      console.log(`   ... and ${formats.length - displayCount} more formats`);
-    }
-    console.log("");
 
     // Select the highest resolution format
     if (formats.length > 0) {
       console.log("4️⃣ ⚙️ Selecting highest resolution format...");
 
-      // Find the format with the highest resolution (width * height)
+      // Find the format with the highest resolution (width * height).
+      // On tie, prefer the one with the higher frameRate.
       let bestFormat = formats[0];
       let maxPixels = bestFormat.width * bestFormat.height;
+      let overallMaxFps = bestFormat.frameRate || 0;
 
       for (const format of formats) {
         const pixels = format.width * format.height;
-        if (pixels > maxPixels) {
+        const fr = format.frameRate || 0;
+        overallMaxFps = Math.max(overallMaxFps, fr);
+        if (pixels > maxPixels || (pixels === maxPixels && fr > (bestFormat.frameRate || 0))) {
           maxPixels = pixels;
           bestFormat = format;
         }
       }
 
+      // Compute best fps available for the selected resolution
+      let bestFpsForResolution = 0;
+      for (const format of formats) {
+        if (format.width === bestFormat.width && format.height === bestFormat.height) {
+          bestFpsForResolution = Math.max(bestFpsForResolution, format.frameRate || 0);
+        }
+      }
+
       console.log(
-        `   🎯 Selected: ${bestFormat.width}x${bestFormat.height} @ ${
-          bestFormat.frameRate
-        }fps (${maxPixels.toLocaleString()} pixels)`
+        `   🎯 Selected: ${bestFormat.width}x${bestFormat.height} @ ${bestFpsForResolution}fps (${maxPixels.toLocaleString()} pixels)`
       );
+      console.log(`     🔢 Best fps for this resolution: ${bestFpsForResolution}fps`);
+      console.log(`     🌐 Best fps overall available: ${overallMaxFps}fps`);
 
       try {
         await camera.setDesiredFormat(
           bestFormat.width,
           bestFormat.height,
-          bestFormat.frameRate
+          bestFpsForResolution
         );
         console.log("✅ Format set successfully");
       } catch (error) {
@@ -123,20 +172,70 @@ async function takeCameraSnapshot() {
             fs.mkdirSync(snapshotsDir, { recursive: true });
           }
 
-          // Convert RGBA buffer to JPG using Sharp
+          // Decide how to interpret the incoming buffer by size and header
+          const w = cameraWidth;
+          const h = cameraHeight;
+          const expectedRGBA = w * h * 4;
+          const expectedRGB24 = w * h * 3;
+          const expectedNV12 = Math.floor(w * h * 1.5);
+
+          const isJPEG =
+            frameBuffer.length >= 2 &&
+            frameBuffer[0] === 0xff &&
+            frameBuffer[1] === 0xd8;
+
           const filename = `snapshot_${Date.now()}.jpg`;
           const filepath = path.join(snapshotsDir, filename);
 
-          console.log("🎨 Converting RGBA buffer to JPG...");
-          await sharp(frameBuffer, {
-            raw: {
-              width: cameraWidth,
-              height: cameraHeight,
-              channels: 4, // RGBA = 4 channels
-            },
-          })
-            .jpeg({ quality: 90 }) // Set JPG quality (0-100)
-            .toFile(filepath);
+          if (frameBuffer.length === expectedRGBA) {
+            console.log("🎨 Interpreting buffer as RGBA (4 channels)");
+            console.log("🎨 Converting RGBA buffer to JPG...");
+            await sharp(frameBuffer, {
+              raw: { width: w, height: h, channels: 4 },
+            })
+              .jpeg({ quality: 90 })
+              .toFile(filepath);
+          } else if (frameBuffer.length === expectedRGB24) {
+            console.log(
+              "🎨 Interpreting buffer as RGB24 (3 channels). Doing JS expansion to RGBA..."
+            );
+            // Expand RGB24 -> RGBA (simple and safe JS fallback)
+            const rgba = Buffer.alloc(expectedRGBA);
+            for (
+              let src = 0, dst = 0;
+              src < frameBuffer.length;
+              src += 3, dst += 4
+            ) {
+              rgba[dst] = frameBuffer[src];
+              rgba[dst + 1] = frameBuffer[src + 1];
+              rgba[dst + 2] = frameBuffer[src + 2];
+              rgba[dst + 3] = 255; // opaque alpha
+            }
+            console.log("🎨 Converting expanded RGBA buffer to JPG...");
+            await sharp(rgba, { raw: { width: w, height: h, channels: 4 } })
+              .jpeg({ quality: 90 })
+              .toFile(filepath);
+          } else if (frameBuffer.length === expectedNV12) {
+            console.log(
+              "⚠️ Detected NV12 (YUV 4:2:0) frame format. This example does not implement NV12->RGBA conversion in JS."
+            );
+            console.log(
+              "     Options: 1) Select an RGB format on the camera, 2) Add a native NV12->RGBA converter, or 3) handle NV12 decoding in your app."
+            );
+            throw new Error("NV12 frames are not supported by this example");
+          } else if (isJPEG) {
+            console.log(
+              "🎯 Detected MJPEG/JPEG frame. Saving directly as JPG..."
+            );
+            fs.writeFileSync(filepath, frameBuffer);
+          } else {
+            // Unknown format: try to be helpful by reporting expected sizes
+            console.log("⚠️ Unknown frame buffer layout. Sizes:");
+            console.log(
+              `   received: ${frameBuffer.length}, expected RGBA: ${expectedRGBA}, RGB24: ${expectedRGB24}, NV12: ${expectedNV12}`
+            );
+            throw new Error("Unknown/unhandled frame buffer format");
+          }
 
           console.log(`✅ Snapshot saved: ${filename}`);
           console.log(`📍 File location: ${filepath}`);

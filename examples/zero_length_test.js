@@ -38,7 +38,7 @@ async function zeroLengthTest(durationMs = 5000) {
         // Use the CameraFormat object directly with the new setFormat API
         await camera.setFormat(best);
       } catch (e) {
-        console.warn("Failed to set format:", e.message || e);
+        console.warn("Failed to set format:", e && e.message ? e.message : e);
       }
     }
 

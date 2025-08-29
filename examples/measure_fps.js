@@ -48,7 +48,11 @@ async function measure() {
         } else {
           const f = formats[formatIndex];
           console.log('Setting format to', formatToString(f));
-          await cam.setFormat(f);
+          try {
+            await cam.setFormat(f);
+          } catch (e) {
+            console.warn('setFormat failed, continuing with default:', e && e.message ? e.message : e);
+          }
         }
       } else {
         console.log('No format index given; using current/default format');

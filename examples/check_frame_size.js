@@ -1,10 +1,26 @@
 const Camera = require('../addon.js');
 
-function expectedSizes(width, height) {
+function expectedSizes(width, height, subtype) {
+  // For compressed subtypes (MJPEG, etc.) the frame buffer length is variable
+  // and cannot be predicted from width/height. Return null to indicate
+  // variable/compressed frames.
+  if (subtype && /(MJP|MJPEG|MJPG|JPEG|H264|AVC1|HEVC|H265|X264)/i.test(subtype)) {
+    return null;
+  }
+
   const rgba = width * height * 4; // RGB32 / RGBA
   const rgb24 = width * height * 3; // RGB24
   const nv12 = (width * height * 3) / 2; // NV12 (Y plane + interleaved UV)
   return { rgba, rgb24, nv12 };
+}
+
+function formatToString(f) {
+  if (!f) return '<none>';
+  const subtype = f.subtype || f.guid || '<unknown>';
+  const w = f.width || '?';
+  const h = f.height || '?';
+  const fr = (typeof f.frameRate !== 'undefined') ? f.frameRate : '?';
+  return `${subtype} ${w}x${h}@${fr}`;
 }
 
 async function runTest() {
@@ -27,16 +43,18 @@ async function runTest() {
       return;
     }
 
-    // Pick first supported format (you can change index to test different formats)
-    const chosen = formats[0];
-    console.log('Setting format to', chosen);
+  // Pick first supported format (you can change index to test different formats)
+  const chosen = formats[0];
+  console.log('Setting format to', formatToString(chosen));
 
-    await cam.setFormat(chosen);
+  await cam.setFormat(chosen);
 
     const dims = await cam.getDimensions();
     console.log('getDimensions reports:', dims);
 
-    const exp = expectedSizes(dims.width, dims.height);
+  // Use the actual dimensions returned by the device and the chosen subtype/guid
+  const subtypeForCheck = (chosen && (chosen.subtype || chosen.guid)) || null;
+  const exp = expectedSizes(dims.width, dims.height, subtypeForCheck);
     console.log('Expected sizes (bytes):', exp);
 
     let frameCount = 0;
@@ -46,14 +64,21 @@ async function runTest() {
       frameCount++;
       const len = buffer.length;
       const matches = [];
-      if (len === exp.rgba) matches.push('RGBA');
-      if (len === exp.rgb24) matches.push('RGB24');
-      if (len === exp.nv12) matches.push('NV12');
+      // If exp is null the chosen format is likely compressed (e.g., MJPEG)
+      if (exp === null) {
+        // Classify as compressed; report length but do not count as mismatch.
+        const sub = subtypeForCheck || '<compressed>';
+        console.log(`Frame ${frameCount}: buffer.length=${len} (COMPRESSED, subtype=${sub})`);
+      } else {
+        if (len === exp.rgba) matches.push('RGBA');
+        if (len === exp.rgb24) matches.push('RGB24');
+        if (len === exp.nv12) matches.push('NV12');
 
-      console.log(`Frame ${frameCount}: buffer.length=${len} (${matches.length ? matches.join('|') : 'UNKNOWN'})`);
+        console.log(`Frame ${frameCount}: buffer.length=${len} (${matches.length ? matches.join('|') : 'UNKNOWN'})`);
 
-      if (!matches.length) {
-        mismatches++;
+        if (!matches.length) {
+          mismatches++;
+        }
       }
 
       // After 5 frames stop and report

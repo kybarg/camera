@@ -309,98 +309,12 @@ HRESULT CCapture::OnReadSample(
         hrBuf = pBuffer->Lock(&pData, &maxLen, &curLen);
         if (SUCCEEDED(hrBuf) && pData && curLen > 0) {
           try {
+            // Deliver the raw contiguous buffer bytes as-is to the frame callback.
             std::vector<uint8_t> out;
-
-            if (subtype == MFVideoFormat_NV12) {
-              // Optimized NV12 -> RGBA conversion. Process two pixels at a time
-              size_t expected = static_cast<size_t>(width) * height * 3 / 2;
-              if (curLen >= expected) {
-                out.resize(static_cast<size_t>(width) * height * 4);
-                const uint8_t* yPlane = pData;
-                const uint8_t* uvPlane = pData + (width * height);
-                uint8_t* dst = out.data();
-
-                auto clamp = [](int v) -> uint8_t { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); };
-
-                for (UINT32 y = 0; y < height; ++y) {
-                  const uint8_t* yRow = yPlane + (size_t)y * width;
-                  const uint8_t* uvRow = uvPlane + (size_t)(y / 2) * width;
-
-                  UINT32 x = 0;
-                  for (; x + 1 < width; x += 2) {
-                    int Y0 = yRow[x];
-                    int Y1 = yRow[x + 1];
-                    int uvIndex = (int)(x & ~1);
-                    int U = uvRow[uvIndex];
-                    int V = uvRow[uvIndex + 1];
-
-                    int C0 = Y0 - 16;
-                    int C1 = Y1 - 16;
-                    int D = U - 128;
-                    int E = V - 128;
-
-                    int R0 = (298 * C0 + 409 * E + 128) >> 8;
-                    int G0 = (298 * C0 - 100 * D - 208 * E + 128) >> 8;
-                    int B0 = (298 * C0 + 516 * D + 128) >> 8;
-
-                    int R1 = (298 * C1 + 409 * E + 128) >> 8;
-                    int G1 = (298 * C1 - 100 * D - 208 * E + 128) >> 8;
-                    int B1 = (298 * C1 + 516 * D + 128) >> 8;
-
-                    *dst++ = clamp(R0);
-                    *dst++ = clamp(G0);
-                    *dst++ = clamp(B0);
-                    *dst++ = 255;
-
-                    *dst++ = clamp(R1);
-                    *dst++ = clamp(G1);
-                    *dst++ = clamp(B1);
-                    *dst++ = 255;
-                  }
-
-                  // handle odd pixel at end of row
-                  if (x < width) {
-                    int Y0 = yRow[x];
-                    int uvIndex = (int)(x & ~1);
-                    int U = uvRow[uvIndex];
-                    int V = uvRow[uvIndex + 1];
-
-                    int C0 = Y0 - 16;
-                    int D = U - 128;
-                    int E = V - 128;
-
-                    int R0 = (298 * C0 + 409 * E + 128) >> 8;
-                    int G0 = (298 * C0 - 100 * D - 208 * E + 128) >> 8;
-                    int B0 = (298 * C0 + 516 * D + 128) >> 8;
-
-                    *dst++ = clamp(R0);
-                    *dst++ = clamp(G0);
-                    *dst++ = clamp(B0);
-                    *dst++ = 255;
-                  }
-                }
-              }
-            } else if (subtype == MFVideoFormat_RGB24) {
-              // RGB24 (BGR24) -> RGBA using shared conversion helper (may use SIMD)
-              size_t pixels = static_cast<size_t>(width) * height;
-              out.resize(pixels * 4);
-              simd_rgb24_to_rgba(reinterpret_cast<const uint8_t*>(pData), out.data(), pixels);
-            } else if (subtype == MFVideoFormat_RGB32) {
-              // Use shared conversion helpers: simdRgb will pick fastest available
-              size_t pixels = curLen / 4;
-              out.resize(pixels * 4);
-              simd_rgb32_to_rgba(reinterpret_cast<const uint8_t*>(pData), out.data(), pixels);
-            } else {
-              // Unknown subtype: pass raw buffer
-              out.assign(pData, pData + curLen);
-            }
-
-            if (!out.empty()) {
-              m_frameCallback(std::move(out));
-            }
-
+            out.assign(pData, pData + curLen);
+            m_frameCallback(std::move(out));
           } catch (...) {
-            // ignore conversion errors
+            // ignore delivery errors
           }
         }
         pBuffer->Unlock();
@@ -704,134 +618,27 @@ done:
 //-------------------------------------------------------------------
 
 HRESULT ConfigureSourceReader(IMFSourceReader* pReader) {
-  // The list of acceptable types.
-  GUID subtypes[] = {
-      MFVideoFormat_NV12, MFVideoFormat_YUY2, MFVideoFormat_UYVY, MFVideoFormat_RGB32, MFVideoFormat_RGB24, MFVideoFormat_IYUV};
-
-  HRESULT hr = S_OK;
-  BOOL bUseNativeType = FALSE;
-
-  GUID subtype = {0};
+  // Simplified behavior: respect any current media type previously set
+  // (for example via CCapture::SetFormat). Do not force-convert to RGB32
+  // or register color-converter MFTs. If no current media type is present,
+  // attempt to set the first native media type (index 0) as a sensible default.
+  if (pReader == NULL) return E_POINTER;
 
   IMFMediaType* pType = NULL;
-
-  // If the source's native format matches any of the formats in
-  // the list, prefer the native format.
-
-  // Register the color converter MFT locally so the source reader can
-  // use it to convert to RGB32 if available.
-  // This is safe to call multiple times.
-  MFTRegisterLocalByCLSID(
-      __uuidof(CColorConvertDMO),
-      MFT_CATEGORY_VIDEO_PROCESSOR,
-      L"",
-      MFT_ENUM_FLAG_SYNCMFT,
-      0,
-      NULL,
-      0,
-      NULL);
-
-  // Note: The camera might support multiple output formats,
-  // including a range of frame dimensions. The application could
-  // provide a list to the user and have the user select the
-  // camera's output format. That is outside the scope of this
-  // sample, however.
-
-  // Prefer an already-set current media type (e.g. set via SetFormat).
-  // This ensures a previously selected media type is preserved instead of being
-  // overridden by ConfigureSourceReader enumerating native types.
-  HRESULT hrCurr = pReader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType);
-  if (SUCCEEDED(hrCurr) && pType) {
-    hr = pType->GetGUID(MF_MT_SUBTYPE, &subtype);
-    if (FAILED(hr)) {
-      goto done;
-    }
-  } else {
-    // Fall back to querying the native media type list if no current type set.
-    hr = pReader->GetNativeMediaType(
-        (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-        0,  // Type index
-        &pType);
-
-    if (FAILED(hr)) {
-      goto done;
-    }
-
-    hr = pType->GetGUID(MF_MT_SUBTYPE, &subtype);
-
-    if (FAILED(hr)) {
-      goto done;
-    }
+  HRESULT hr = pReader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType);
+  if (SUCCEEDED(hr) && pType) {
+    // A current media type is already set (for example SetFormat was used).
+    SafeRelease(&pType);
+    return S_OK;
   }
 
-  // First, attempt to set an explicit RGB32 output type copied from the
-  // native attributes (frame size/frame rate). This makes RGB32 the
-  // preferred output when the source reader can perform the conversion.
-  {
-    IMFMediaType* pRgb = NULL;
-    HRESULT hrRgb = MFCreateMediaType(&pRgb);
-    if (SUCCEEDED(hrRgb) && pRgb) {
-      hrRgb = pRgb->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    }
-    if (SUCCEEDED(hrRgb)) {
-      hrRgb = pRgb->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-    }
-    if (SUCCEEDED(hrRgb)) hrRgb = CopyAttribute(pType, pRgb, MF_MT_FRAME_SIZE);
-    if (SUCCEEDED(hrRgb)) hrRgb = CopyAttribute(pType, pRgb, MF_MT_FRAME_RATE);
-    if (SUCCEEDED(hrRgb)) hrRgb = CopyAttribute(pType, pRgb, MF_MT_PIXEL_ASPECT_RATIO);
-
-    if (SUCCEEDED(hrRgb)) {
-      HRESULT hrSet = pReader->SetCurrentMediaType(
-          (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-          NULL,
-          pRgb);
-      if (SUCCEEDED(hrSet)) {
-        SafeRelease(&pRgb);
-        SafeRelease(&pType);
-        return S_OK;
-      }
-    }
-    SafeRelease(&pRgb);
+  // No current media type set; try to use the first native media type.
+  hr = pReader->GetNativeMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &pType);
+  if (SUCCEEDED(hr) && pType) {
+    hr = pReader->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pType);
+    SafeRelease(&pType);
   }
 
-  for (UINT32 i = 0; i < ARRAYSIZE(subtypes); i++) {
-    if (subtype == subtypes[i]) {
-      hr = pReader->SetCurrentMediaType(
-          (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-          NULL,
-          pType);
-
-      bUseNativeType = TRUE;
-      break;
-    }
-  }
-
-  if (!bUseNativeType) {
-    // None of the native types worked. The camera might offer
-    // output a compressed type such as MJPEG or DV.
-
-    // Try adding a decoder.
-
-    for (UINT32 i = 0; i < ARRAYSIZE(subtypes); i++) {
-      hr = pType->SetGUID(MF_MT_SUBTYPE, subtypes[i]);
-
-      if (FAILED(hr)) {
-        goto done;
-      }
-
-      hr = pReader->SetCurrentMediaType(
-          (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-          NULL,
-          pType);
-
-      if (SUCCEEDED(hr)) {
-        break;
-      }
-    }
-  }
-
-done:
-  SafeRelease(&pType);
   return hr;
 }
 

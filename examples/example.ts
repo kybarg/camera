@@ -3,7 +3,13 @@ import * as path from "node:path";
 import sharp from "sharp";
 import { exec } from "node:child_process";
 const Camera = require("../addon.js");
-import type { DeviceInfo, CameraFormat, CameraDimensions, OperationResult, CameraInfo } from "../index.d.ts";
+import type {
+  DeviceInfo,
+  CameraFormat,
+  CameraDimensions,
+  OperationResult,
+  CameraInfo,
+} from "../index.d.ts";
 
 async function takeCameraSnapshot(): Promise<void> {
   let cameraWidth: number = 640; // Default fallback
@@ -47,8 +53,10 @@ async function takeCameraSnapshot(): Promise<void> {
       // Native returns friendlyName, symbolicLink, model, encoders, supportedResolutions
       const name = (info && (info.name || info.friendlyName)) || "<unknown>";
       const encoders = (info && (info.encoders || [])) as string[];
-  // Camera info returns formats as a flat CameraFormat[]
-  const infoFormats: CameraFormat[] = Array.isArray(info && info.formats) ? (info.formats as CameraFormat[]) : [];
+      // Camera info returns formats as a flat CameraFormat[]
+      const infoFormats: CameraFormat[] = Array.isArray(info && info.formats)
+        ? (info.formats as CameraFormat[])
+        : [];
 
       console.log("   🔎 Camera info:");
       console.log(`     name: ${name}`);
@@ -72,10 +80,12 @@ async function takeCameraSnapshot(): Promise<void> {
           console.log(`       subtype=${s}  (${group.length} entries)`);
           const sample = group.slice(0, 6);
           for (const r of sample) {
-            const fr = (r as any).frameRate !== undefined ? (r as any).frameRate : 0;
+            const fr =
+              (r as any).frameRate !== undefined ? (r as any).frameRate : 0;
             console.log(`         - ${r.width}x${r.height} @ ${fr} frameRate`);
           }
-          if (group.length > 6) console.log(`         ... and ${group.length - 6} more`);
+          if (group.length > 6)
+            console.log(`         ... and ${group.length - 6} more`);
         }
       } else {
         console.log("     formats: <none>");
@@ -97,12 +107,12 @@ async function takeCameraSnapshot(): Promise<void> {
       // On tie, prefer the one with the higher frameRate.
       let bestFormat: CameraFormat = formats[0];
       let maxPixels: number = bestFormat.width * bestFormat.height;
-  let overallMaxFrameRate: number = bestFormat.frameRate || 0;
+      let overallMaxFrameRate: number = bestFormat.frameRate || 0;
 
       for (const format of formats) {
         const pixels: number = format.width * format.height;
-  const fr: number = format.frameRate || 0;
-  overallMaxFrameRate = Math.max(overallMaxFrameRate, fr);
+        const fr: number = format.frameRate || 0;
+        overallMaxFrameRate = Math.max(overallMaxFrameRate, fr);
         if (
           pixels > maxPixels ||
           (pixels === maxPixels && fr > (bestFormat.frameRate || 0))
@@ -115,16 +125,28 @@ async function takeCameraSnapshot(): Promise<void> {
       // Compute best frameRate available for the selected resolution
       let bestFrameRateForResolution = 0;
       for (const format of formats) {
-        if (format.width === bestFormat.width && format.height === bestFormat.height) {
-          bestFrameRateForResolution = Math.max(bestFrameRateForResolution, format.frameRate || 0);
+        if (
+          format.width === bestFormat.width &&
+          format.height === bestFormat.height
+        ) {
+          bestFrameRateForResolution = Math.max(
+            bestFrameRateForResolution,
+            format.frameRate || 0
+          );
         }
       }
 
       console.log(
-        `   🎯 Selected: ${bestFormat.width}x${bestFormat.height} @ ${bestFrameRateForResolution} frameRate (${maxPixels.toLocaleString()} pixels)`
+        `   🎯 Selected: ${bestFormat.width}x${
+          bestFormat.height
+        } @ ${bestFrameRateForResolution} frameRate (${maxPixels.toLocaleString()} pixels)`
       );
-      console.log(`     🔢 Best frameRate for this resolution: ${bestFrameRateForResolution}`);
-      console.log(`     🌐 Best frameRate overall available: ${overallMaxFrameRate}`);
+      console.log(
+        `     🔢 Best frameRate for this resolution: ${bestFrameRateForResolution}`
+      );
+      console.log(
+        `     🌐 Best frameRate overall available: ${overallMaxFrameRate}`
+      );
 
       try {
         await camera.setFormat(bestFormat);
@@ -176,7 +198,9 @@ async function takeCameraSnapshot(): Promise<void> {
           const expectedNV12 = Math.floor(w * h * 1.5);
 
           const isJPEG =
-            frameBuffer.length >= 2 && frameBuffer[0] === 0xff && frameBuffer[1] === 0xd8;
+            frameBuffer.length >= 2 &&
+            frameBuffer[0] === 0xff &&
+            frameBuffer[1] === 0xd8;
 
           const filename: string = `snapshot_${Date.now()}.jpg`;
           const filepath: string = path.join(snapshotsDir, filename);
@@ -195,7 +219,11 @@ async function takeCameraSnapshot(): Promise<void> {
             );
             // Expand RGB24 -> RGBA (simple and safe JS fallback)
             const rgba = Buffer.alloc(expectedRGBA);
-            for (let src = 0, dst = 0; src < frameBuffer.length; src += 3, dst += 4) {
+            for (
+              let src = 0, dst = 0;
+              src < frameBuffer.length;
+              src += 3, dst += 4
+            ) {
               rgba[dst] = frameBuffer[src];
               rgba[dst + 1] = frameBuffer[src + 1];
               rgba[dst + 2] = frameBuffer[src + 2];
@@ -214,7 +242,9 @@ async function takeCameraSnapshot(): Promise<void> {
             );
             throw new Error("NV12 frames are not supported by this example");
           } else if (isJPEG) {
-            console.log("🎯 Detected MJPEG/JPEG frame. Saving directly as JPG...");
+            console.log(
+              "🎯 Detected MJPEG/JPEG frame. Saving directly as JPG..."
+            );
             fs.writeFileSync(filepath, frameBuffer);
           } else {
             // Unknown format: try to be helpful by reporting expected sizes

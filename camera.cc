@@ -39,6 +39,20 @@ static std::string SubtypeGuidToName(const GUID& g) {
   return guidStr;
 }
 
+// Helper: convert a GUID to a UTF-8 string like "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}"
+static std::string GuidToString(const GUID& g) {
+  OLECHAR wsz[64];
+  StringFromGUID2(g, wsz, ARRAYSIZE(wsz));
+  int len = WideCharToMultiByte(CP_UTF8, 0, wsz, -1, NULL, 0, NULL, NULL);
+  std::string guidStr;
+  if (len > 0) {
+    guidStr.assign(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wsz, -1, &guidStr[0], len, NULL, NULL);
+    if (!guidStr.empty() && guidStr.back() == '\0') guidStr.pop_back();
+  }
+  return guidStr;
+}
+
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
   Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("getCameraInfoAsync", &Camera::GetCameraInfoAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("setFormatAsync", &Camera::SetFormatAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync)});
 
@@ -143,11 +157,13 @@ Napi::Value Camera::GetCameraInfoAsync(const Napi::CallbackInfo& info) {
           UINT32 h = std::get<2>(types[i]);
           double fr = std::get<3>(types[i]);
 
-          // Use friendly short name for subtype if available
+          // Use friendly short name for subtype if available and include GUID string
           std::string subtypeName = SubtypeGuidToName(g);
+          std::string guidStr = GuidToString(g);
 
           Napi::Object entry = Napi::Object::New(env);
           entry.Set("subtype", Napi::String::New(env, subtypeName));
+          entry.Set("guid", Napi::String::New(env, guidStr));
           entry.Set("width", Napi::Number::New(env, w));
           entry.Set("height", Napi::Number::New(env, h));
           // use only `frameRate` for frame rate information
@@ -189,7 +205,6 @@ Camera::~Camera() {
     device->Release();
     device = nullptr;
   }
-
 }
 
 Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
@@ -449,12 +464,13 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
           GUID g = std::get<0>(types[i]);
           // Use short friendly name when possible (e.g., "MJPEG", "NV12")
           std::string subtypeName = SubtypeGuidToName(g);
-
+          std::string guidStr = GuidToString(g);
           UINT32 w = std::get<1>(types[i]);
           UINT32 h = std::get<2>(types[i]);
           double fr = std::get<3>(types[i]);
 
           obj.Set("subtype", Napi::String::New(env, subtypeName));
+          obj.Set("guid", Napi::String::New(env, guidStr));
           obj.Set("width", Napi::Number::New(env, w));
           obj.Set("height", Napi::Number::New(env, h));
           obj.Set("frameRate", Napi::Number::New(env, fr));
@@ -479,8 +495,6 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
   return deferred.Promise();
 }
 
-
-
 // Helper: map common subtype strings to GUIDs
 static bool ParseSubtypeString(const std::string& s, GUID& out) {
   // Accept several common names (case-insensitive)
@@ -496,6 +510,10 @@ static bool ParseSubtypeString(const std::string& s, GUID& out) {
   }
   if (u == "rgb32" || u == "bgra" || u == "rgba") {
     out = MFVideoFormat_RGB32;
+    return true;
+  }
+  if (u == "yuy2" || u == "yuyv" || u == "yuv2" || u == "yuv") {
+    out = MFVideoFormat_YUY2;
     return true;
   }
   if (u == "mjpg" || u == "mjpeg" || u == "mjepg" || u == "mjpg") {
@@ -539,11 +557,16 @@ Napi::Value Camera::SetFormatAsync(const Napi::CallbackInfo& info) {
 
   {
     Napi::Object obj = info[0].As<Napi::Object>();
-    if (!(obj.Has("subtype") && obj.Get("subtype").IsString())) {
-      Napi::TypeError::New(env, "Format object missing required 'subtype' string").ThrowAsJavaScriptException();
+    // Accept either a 'guid' string (preferred) or a 'subtype' friendly name
+    if (obj.Has("guid") && obj.Get("guid`).IsString()) {
+      subtypeStr = ""; // leave subtypeStr empty and parse guid below
+    } else if (!(obj.Has("subtype") && obj.Get("subtype").IsString())) {
+      Napi::TypeError::New(env, "Format object must include either 'guid' string or 'subtype' string").ThrowAsJavaScriptException();
       return env.Null();
     }
-    subtypeStr = obj.Get("subtype").As<Napi::String>().Utf8Value();
+    if (obj.Has("subtype") && obj.Get("subtype").IsString()) {
+      subtypeStr = obj.Get("subtype").As<Napi::String>().Utf8Value();
+    }
 
     if (!(obj.Has("width") && obj.Get("width").IsNumber())) {
       Napi::TypeError::New(env, "Format object missing required 'width' number").ThrowAsJavaScriptException();
@@ -565,9 +588,29 @@ Napi::Value Camera::SetFormatAsync(const Napi::CallbackInfo& info) {
   }
 
   GUID subtypeGuid = {0};
-  if (!ParseSubtypeString(subtypeStr, subtypeGuid)) {
-    Napi::TypeError::New(env, "Unknown subtype string or invalid GUID").ThrowAsJavaScriptException();
-    return env.Null();
+  // If a GUID string was provided, try parsing it first
+  if (info[0].As<Napi::Object>().Has("guid") && info[0].As<Napi::Object>().Get("guid").IsString()) {
+    std::string guidInput = info[0].As<Napi::Object>().Get("guid").As<Napi::String>().Utf8Value();
+    wchar_t wbuf[64];
+    size_t needed = 0;
+    mbstowcs_s(&needed, wbuf, guidInput.c_str(), _TRUNCATE);
+    CLSID clsid;
+    if (SUCCEEDED(CLSIDFromString(wbuf, &clsid))) {
+      subtypeGuid = clsid;
+    } else if (!subtypeStr.empty()) {
+      if (!ParseSubtypeString(subtypeStr, subtypeGuid)) {
+        Napi::TypeError::New(env, "Unknown subtype string or invalid GUID").ThrowAsJavaScriptException();
+        return env.Null();
+      }
+    } else {
+      Napi::TypeError::New(env, "Invalid 'guid' string and no 'subtype' provided").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+  } else {
+    if (!ParseSubtypeString(subtypeStr, subtypeGuid)) {
+      Napi::TypeError::New(env, "Unknown subtype string or invalid GUID").ThrowAsJavaScriptException();
+      return env.Null();
+    }
   }
 
   auto deferred = Napi::Promise::Deferred::New(env);
@@ -581,8 +624,8 @@ Napi::Value Camera::SetFormatAsync(const Napi::CallbackInfo& info) {
 
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), subtypeGuid, width, height, frameRate]() mutable {
     try {
-  // No validation against GetLastSupportedFormats here; forward request to
-  // CCapture::SetFormat which will return an HRESULT indicating success or failure.
+      // No validation against GetLastSupportedFormats here; forward request to
+      // CCapture::SetFormat which will return an HRESULT indicating success or failure.
 
       HRESULT hr = this->device->SetFormat(subtypeGuid, width, height, frameRate);
       if (FAILED(hr)) {

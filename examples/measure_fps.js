@@ -11,6 +11,15 @@ function hrNowMs() {
   return Number(process.hrtime.bigint()) / 1e6;
 }
 
+function formatToString(f) {
+  if (!f) return '<none>';
+  const subtype = f.subtype || f.subType || f.format || 'unknown';
+  const w = f.width || '?';
+  const h = f.height || '?';
+  const fr = (typeof f.frameRate !== 'undefined') ? f.frameRate : '?';
+  return `${subtype} ${w}x${h}@${fr}`;
+}
+
 async function measure() {
   const cam = new Camera();
 
@@ -26,13 +35,21 @@ async function measure() {
 
     const formats = await cam.getSupportedFormats();
     console.log('Supported formats:', formats.length);
+    // print a short list with indices so user can choose a formatIndex
+    formats.forEach((fmt, idx) => {
+      console.log(`  [${idx}] ${formatToString(fmt)}`);
+    });
     if (formats.length === 0) {
       console.error('No supported formats');
     } else {
-      if (formatIndex !== null && formats[formatIndex]) {
-        const f = formats[formatIndex];
-        console.log('Setting format to', f);
-        await cam.setFormat(f);
+      if (formatIndex !== null) {
+        if (!Number.isInteger(formatIndex) || formatIndex < 0 || formatIndex >= formats.length) {
+          console.warn('Provided formatIndex is out of range; ignoring and using default format');
+        } else {
+          const f = formats[formatIndex];
+          console.log('Setting format to', formatToString(f));
+          await cam.setFormat(f);
+        }
       } else {
         console.log('No format index given; using current/default format');
       }
@@ -40,6 +57,31 @@ async function measure() {
 
     const dims = await cam.getDimensions();
     console.log('getDimensions:', dims);
+
+    // Determine declared format info for the active dimensions.
+    let declaredFormat = null;
+    if (formatIndex !== null && formats[formatIndex]) {
+      declaredFormat = formats[formatIndex];
+    } else {
+      // Find a supported format that matches the returned dimensions.
+      declaredFormat = formats.find((f) => f.width === dims.width && f.height === dims.height) || null;
+      // If multiple matches exist, prefer one with the highest frameRate
+      if (!declaredFormat) {
+        // no exact match found
+      } else {
+        const matches = formats.filter((f) => f.width === dims.width && f.height === dims.height);
+        if (matches.length > 1) {
+          matches.sort((a, b) => (b.frameRate || 0) - (a.frameRate || 0));
+          declaredFormat = matches[0];
+        }
+      }
+    }
+
+    if (declaredFormat) {
+      console.log('Declared format for these dimensions:', formatToString(declaredFormat));
+    } else {
+      console.log('No declared supported-format matched the current dimensions');
+    }
 
     let timestamps = [];
 

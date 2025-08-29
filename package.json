@@ -26,7 +26,7 @@
   "scripts": {
     "build": "node-gyp rebuild",
     "example": "node examples/example.js",
-    "example-ts": "npx ts-node examples/typescript-example.ts",
+    "example-ts": "npx ts-node examples/example.ts",
     "type-check": "tsc --noEmit",
     "prepublishOnly": "npm run build && npm run type-check"
   },

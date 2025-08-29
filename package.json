@@ -26,14 +26,14 @@
   "scripts": {
     "build": "node-gyp rebuild",
     "example": "node examples/example.js",
-    "example-ts": "npx ts-node examples/typescript-example.ts",
+    "example-ts": "npx ts-node examples/example.ts",
     "type-check": "tsc --noEmit",
     "prepublishOnly": "npm run build && npm run type-check"
   },
   "dependencies": {
     "bindings": "^1.5.0",
-    "node-addon-api": "^7.1.1",
-    "node-gyp": "^10.3.1"
+    "node-addon-api": "^8.5.0",
+    "node-gyp": "^11.4.2"
   },
   "devDependencies": {
     "@types/node": "^20.19.9",

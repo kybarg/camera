@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <new>
+#include <cstring>
 
 #include "capture.h"
 #include "convert.h"
@@ -194,7 +195,6 @@ HRESULT CCapture::CreateInstance(
 //-------------------------------------------------------------------
 
 CCapture::CCapture(HWND hwnd) : m_pReader(NULL),
-                                m_pWriter(NULL),
                                 m_hwndEvent(hwnd),
                                 m_nRefCount(1),
                                 m_bFirstSample(FALSE),
@@ -209,7 +209,6 @@ CCapture::CCapture(HWND hwnd) : m_pReader(NULL),
 
 CCapture::~CCapture() {
   assert(m_pReader == NULL);
-  assert(m_pWriter == NULL);
   DeleteCriticalSection(&m_critsec);
 }
 
@@ -291,12 +290,7 @@ HRESULT CCapture::OnReadSample(
     if (FAILED(hr)) {
       goto done;
     }
-    if (m_pWriter) {
-      hr = m_pWriter->WriteSample(0, pSample);
-      if (FAILED(hr)) {
-        goto done;
-      }
-    } else if (m_frameCallback) {
+    if (m_frameCallback) {
       // Deliver sample to the registered frame callback with format conversion
       IMFMediaType* pType = NULL;
       GUID subtype = {0};
@@ -315,98 +309,12 @@ HRESULT CCapture::OnReadSample(
         hrBuf = pBuffer->Lock(&pData, &maxLen, &curLen);
         if (SUCCEEDED(hrBuf) && pData && curLen > 0) {
           try {
+            // Deliver the raw contiguous buffer bytes as-is to the frame callback.
             std::vector<uint8_t> out;
-
-            if (subtype == MFVideoFormat_NV12) {
-              // Optimized NV12 -> RGBA conversion. Process two pixels at a time
-              size_t expected = static_cast<size_t>(width) * height * 3 / 2;
-              if (curLen >= expected) {
-                out.resize(static_cast<size_t>(width) * height * 4);
-                const uint8_t* yPlane = pData;
-                const uint8_t* uvPlane = pData + (width * height);
-                uint8_t* dst = out.data();
-
-                auto clamp = [](int v) -> uint8_t { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); };
-
-                for (UINT32 y = 0; y < height; ++y) {
-                  const uint8_t* yRow = yPlane + (size_t)y * width;
-                  const uint8_t* uvRow = uvPlane + (size_t)(y / 2) * width;
-
-                  UINT32 x = 0;
-                  for (; x + 1 < width; x += 2) {
-                    int Y0 = yRow[x];
-                    int Y1 = yRow[x + 1];
-                    int uvIndex = (int)(x & ~1);
-                    int U = uvRow[uvIndex];
-                    int V = uvRow[uvIndex + 1];
-
-                    int C0 = Y0 - 16;
-                    int C1 = Y1 - 16;
-                    int D = U - 128;
-                    int E = V - 128;
-
-                    int R0 = (298 * C0 + 409 * E + 128) >> 8;
-                    int G0 = (298 * C0 - 100 * D - 208 * E + 128) >> 8;
-                    int B0 = (298 * C0 + 516 * D + 128) >> 8;
-
-                    int R1 = (298 * C1 + 409 * E + 128) >> 8;
-                    int G1 = (298 * C1 - 100 * D - 208 * E + 128) >> 8;
-                    int B1 = (298 * C1 + 516 * D + 128) >> 8;
-
-                    *dst++ = clamp(R0);
-                    *dst++ = clamp(G0);
-                    *dst++ = clamp(B0);
-                    *dst++ = 255;
-
-                    *dst++ = clamp(R1);
-                    *dst++ = clamp(G1);
-                    *dst++ = clamp(B1);
-                    *dst++ = 255;
-                  }
-
-                  // handle odd pixel at end of row
-                  if (x < width) {
-                    int Y0 = yRow[x];
-                    int uvIndex = (int)(x & ~1);
-                    int U = uvRow[uvIndex];
-                    int V = uvRow[uvIndex + 1];
-
-                    int C0 = Y0 - 16;
-                    int D = U - 128;
-                    int E = V - 128;
-
-                    int R0 = (298 * C0 + 409 * E + 128) >> 8;
-                    int G0 = (298 * C0 - 100 * D - 208 * E + 128) >> 8;
-                    int B0 = (298 * C0 + 516 * D + 128) >> 8;
-
-                    *dst++ = clamp(R0);
-                    *dst++ = clamp(G0);
-                    *dst++ = clamp(B0);
-                    *dst++ = 255;
-                  }
-                }
-              }
-            } else if (subtype == MFVideoFormat_RGB24) {
-              // RGB24 (BGR24) -> RGBA using shared conversion helper (may use SIMD)
-              size_t pixels = static_cast<size_t>(width) * height;
-              out.resize(pixels * 4);
-              simd_rgb24_to_rgba(reinterpret_cast<const uint8_t*>(pData), out.data(), pixels);
-            } else if (subtype == MFVideoFormat_RGB32) {
-              // Use shared conversion helpers: simdRgb will pick fastest available
-              size_t pixels = curLen / 4;
-              out.resize(pixels * 4);
-              simd_rgb32_to_rgba(reinterpret_cast<const uint8_t*>(pData), out.data(), pixels);
-            } else {
-              // Unknown subtype: pass raw buffer
-              out.assign(pData, pData + curLen);
-            }
-
-            if (!out.empty()) {
-              m_frameCallback(std::move(out));
-            }
-
+            out.assign(pData, pData + curLen);
+            m_frameCallback(std::move(out));
           } catch (...) {
-            // ignore conversion errors
+            // ignore delivery errors
           }
         }
         pBuffer->Unlock();
@@ -489,7 +397,7 @@ HRESULT CCapture::StartCapture(
     hr = pActivate->ActivateObject(
         __uuidof(IMFMediaSource),
         (void**)&pSource);
-  // ActivateObject result in hr
+    // ActivateObject result in hr
 
     // Get the symbolic link. This is needed to handle device-
     // loss notifications. (See CheckDeviceLost.)
@@ -498,11 +406,11 @@ HRESULT CCapture::StartCapture(
           MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
           &m_pwszSymbolicLink,
           NULL);
-  // GetAllocatedString result in hr
+      // GetAllocatedString result in hr
     }
 
     if (SUCCEEDED(hr)) {
-  hr = OpenMediaSource(pSource);
+      hr = OpenMediaSource(pSource);
     }
   } else {
     // We already initialized the source reader in InitFromActivate.
@@ -520,7 +428,7 @@ HRESULT CCapture::StartCapture(
 
   // We don't write to files in this build; operate in callback-only mode.
   if (SUCCEEDED(hr)) {
-    m_pWriter = NULL;
+    // operate in callback-only mode; no sink writer
   }
 
   // Set up the encoding parameters. Only configure the sink writer when
@@ -528,17 +436,11 @@ HRESULT CCapture::StartCapture(
   // mode), request RGB32 output from the source reader so the sample
   // buffers are uncompressed and usable by the embedding (JS).
   if (SUCCEEDED(hr)) {
-    if (m_pWriter) {
-      hr = ConfigureCapture(param);
-    } else {
-      // Prefer RGB32 by asking ConfigureSourceReader to set the reader's
-      // output type. ConfigureSourceReader will try RGB32 first and fall
-      // back to other supported formats.
-  HRESULT hrCfg = ConfigureSourceReader(m_pReader);
-      if (FAILED(hrCfg)) {
-        // Non-fatal: continue with whatever format the reader provides.
-        hr = S_OK;
-      }
+    // Operate in callback-only mode; prefer RGB32 output from source reader
+    HRESULT hrCfg = ConfigureSourceReader(m_pReader);
+    if (FAILED(hrCfg)) {
+      // Non-fatal: continue with whatever format the reader provides.
+      hr = S_OK;
     }
   }
 
@@ -548,13 +450,19 @@ HRESULT CCapture::StartCapture(
 
     // Request the first video frame.
 
-  hr = m_pReader->ReadSample(
-    (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-    0,
-    NULL,
-    NULL,
-    NULL,
-    NULL);
+    // Ensure the video stream is selected (in case Stop deselected it).
+    if (m_pReader) {
+      HRESULT hrSel = m_pReader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
+      // ignore hrSel if it fails; ReadSample will surface errors.
+    }
+
+    hr = m_pReader->ReadSample(
+        (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+        0,
+        NULL,
+        NULL,
+        NULL,
+        NULL);
   }
 
   SafeRelease(&pSource);
@@ -611,17 +519,22 @@ HRESULT CCapture::EndCaptureSession() {
 
   HRESULT hr = S_OK;
 
-  if (m_pWriter) {
-    hr = m_pWriter->Finalize();
+  // Instead of releasing the source reader outright, flush and deselect the
+  // video stream so the reader stops delivering frames. This allows the
+  // reader to be reused by a subsequent StartCapture without re-creating
+  // the media source/reader, avoiding "already listening" event-generator
+  // errors and improving start/stop reliability.
+  if (m_pReader) {
+    // Flush queued samples for the video stream.
+    HRESULT hrFlush = m_pReader->Flush(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
+    (void)hrFlush;  // non-fatal
+
+    // Deselect the stream so ReadSample will not deliver further frames.
+    HRESULT hrSel = m_pReader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, FALSE);
+    (void)hrSel;  // non-fatal
   }
 
-  SafeRelease(&m_pWriter);
-  // Keep m_pReader alive to allow clean restart without re-activating the media source.
-  // The full cleanup of m_pReader will occur in ReleaseDevice().
-
-  // Clear any registered frame callback and reset state so capture can be restarted.
-  m_frameCallback = nullptr;
-  m_rgbaBuffer.clear();
+  // Reset internal timing state so next start will rebase timestamps.
   m_bFirstSample = TRUE;
   m_llBaseTime = 0;
 
@@ -634,7 +547,7 @@ BOOL CCapture::IsCapturing() {
   EnterCriticalSection(&m_critsec);
 
   // Consider us capturing if we have a writer OR a registered frame callback.
-  BOOL bIsCapturing = (m_pWriter != NULL) || (m_frameCallback != nullptr);
+  BOOL bIsCapturing = (m_frameCallback != nullptr);
 
   LeaveCriticalSection(&m_critsec);
 
@@ -705,183 +618,31 @@ done:
 //-------------------------------------------------------------------
 
 HRESULT ConfigureSourceReader(IMFSourceReader* pReader) {
-  // The list of acceptable types.
-  GUID subtypes[] = {
-      MFVideoFormat_NV12, MFVideoFormat_YUY2, MFVideoFormat_UYVY, MFVideoFormat_RGB32, MFVideoFormat_RGB24, MFVideoFormat_IYUV};
-
-  HRESULT hr = S_OK;
-  BOOL bUseNativeType = FALSE;
-
-  GUID subtype = {0};
+  // Simplified behavior: respect any current media type previously set
+  // (for example via CCapture::SetFormat). Do not force-convert to RGB32
+  // or register color-converter MFTs. If no current media type is present,
+  // attempt to set the first native media type (index 0) as a sensible default.
+  if (pReader == NULL) return E_POINTER;
 
   IMFMediaType* pType = NULL;
-
-  // If the source's native format matches any of the formats in
-  // the list, prefer the native format.
-
-  // Register the color converter MFT locally so the source reader can
-  // use it to convert to RGB32 if available.
-  // This is safe to call multiple times.
-  MFTRegisterLocalByCLSID(
-      __uuidof(CColorConvertDMO),
-      MFT_CATEGORY_VIDEO_PROCESSOR,
-      L"",
-      MFT_ENUM_FLAG_SYNCMFT,
-      0,
-      NULL,
-      0,
-      NULL);
-
-  // Note: The camera might support multiple output formats,
-  // including a range of frame dimensions. The application could
-  // provide a list to the user and have the user select the
-  // camera's output format. That is outside the scope of this
-  // sample, however.
-
-  // Prefer an already-set current media type (e.g. set via SetDesiredFormat).
-  // This ensures SetDesiredFormat takes effect instead of being overridden
-  // by ConfigureSourceReader enumerating native types.
-  HRESULT hrCurr = pReader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType);
-  if (SUCCEEDED(hrCurr) && pType) {
-    hr = pType->GetGUID(MF_MT_SUBTYPE, &subtype);
-    if (FAILED(hr)) {
-      goto done;
-    }
-  } else {
-    // Fall back to querying the native media type list if no current type set.
-    hr = pReader->GetNativeMediaType(
-        (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-        0,  // Type index
-        &pType);
-
-    if (FAILED(hr)) {
-      goto done;
-    }
-
-    hr = pType->GetGUID(MF_MT_SUBTYPE, &subtype);
-
-    if (FAILED(hr)) {
-      goto done;
-    }
+  HRESULT hr = pReader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType);
+  if (SUCCEEDED(hr) && pType) {
+    // A current media type is already set (for example SetFormat was used).
+    SafeRelease(&pType);
+    return S_OK;
   }
 
-  // First, attempt to set an explicit RGB32 output type copied from the
-  // native attributes (frame size/frame rate). This makes RGB32 the
-  // preferred output when the source reader can perform the conversion.
-  {
-    IMFMediaType* pRgb = NULL;
-    HRESULT hrRgb = MFCreateMediaType(&pRgb);
-    if (SUCCEEDED(hrRgb) && pRgb) {
-      hrRgb = pRgb->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    }
-    if (SUCCEEDED(hrRgb)) {
-      hrRgb = pRgb->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-    }
-    if (SUCCEEDED(hrRgb)) hrRgb = CopyAttribute(pType, pRgb, MF_MT_FRAME_SIZE);
-    if (SUCCEEDED(hrRgb)) hrRgb = CopyAttribute(pType, pRgb, MF_MT_FRAME_RATE);
-    if (SUCCEEDED(hrRgb)) hrRgb = CopyAttribute(pType, pRgb, MF_MT_PIXEL_ASPECT_RATIO);
-
-    if (SUCCEEDED(hrRgb)) {
-      HRESULT hrSet = pReader->SetCurrentMediaType(
-          (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-          NULL,
-          pRgb);
-      if (SUCCEEDED(hrSet)) {
-        SafeRelease(&pRgb);
-        SafeRelease(&pType);
-        return S_OK;
-      }
-    }
-    SafeRelease(&pRgb);
+  // No current media type set; try to use the first native media type.
+  hr = pReader->GetNativeMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &pType);
+  if (SUCCEEDED(hr) && pType) {
+    hr = pReader->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pType);
+    SafeRelease(&pType);
   }
 
-  for (UINT32 i = 0; i < ARRAYSIZE(subtypes); i++) {
-    if (subtype == subtypes[i]) {
-      hr = pReader->SetCurrentMediaType(
-          (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-          NULL,
-          pType);
-
-      bUseNativeType = TRUE;
-      break;
-    }
-  }
-
-  if (!bUseNativeType) {
-    // None of the native types worked. The camera might offer
-    // output a compressed type such as MJPEG or DV.
-
-    // Try adding a decoder.
-
-    for (UINT32 i = 0; i < ARRAYSIZE(subtypes); i++) {
-      hr = pType->SetGUID(MF_MT_SUBTYPE, subtypes[i]);
-
-      if (FAILED(hr)) {
-        goto done;
-      }
-
-      hr = pReader->SetCurrentMediaType(
-          (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-          NULL,
-          pType);
-
-      if (SUCCEEDED(hr)) {
-        break;
-      }
-    }
-  }
-
-done:
-  SafeRelease(&pType);
   return hr;
 }
 
-HRESULT ConfigureEncoder(
-    const EncodingParameters& params,
-    IMFMediaType* pType,
-    IMFSinkWriter* pWriter,
-    DWORD* pdwStreamIndex) {
-  HRESULT hr = S_OK;
-
-  IMFMediaType* pType2 = NULL;
-
-  hr = MFCreateMediaType(&pType2);
-
-  if (SUCCEEDED(hr)) {
-    hr = pType2->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = pType2->SetGUID(MF_MT_SUBTYPE, params.subtype);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = pType2->SetUINT32(MF_MT_AVG_BITRATE, params.bitrate);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = CopyAttribute(pType, pType2, MF_MT_FRAME_SIZE);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = CopyAttribute(pType, pType2, MF_MT_FRAME_RATE);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = CopyAttribute(pType, pType2, MF_MT_PIXEL_ASPECT_RATIO);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = CopyAttribute(pType, pType2, MF_MT_INTERLACE_MODE);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = pWriter->AddStream(pType2, pdwStreamIndex);
-  }
-
-  SafeRelease(&pType2);
-  return hr;
-}
+// ConfigureEncoder removed: package operates in callback-only mode (no file writer)
 
 //-------------------------------------------------------------------
 // ConfigureCapture
@@ -891,49 +652,9 @@ HRESULT ConfigureEncoder(
 //-------------------------------------------------------------------
 
 HRESULT CCapture::ConfigureCapture(const EncodingParameters& param) {
-  HRESULT hr = S_OK;
-  DWORD sink_stream = 0;
-
-  IMFMediaType* pType = NULL;
-
-  hr = ConfigureSourceReader(m_pReader);
-
-  if (SUCCEEDED(hr)) {
-    hr = m_pReader->GetCurrentMediaType(
-        (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-        &pType);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = ConfigureEncoder(param, pType, m_pWriter, &sink_stream);
-  }
-
-  if (SUCCEEDED(hr)) {
-    // Register the color converter DSP for this process, in the video
-    // processor category. This will enable the sink writer to enumerate
-    // the color converter when the sink writer attempts to match the
-    // media types.
-
-    hr = MFTRegisterLocalByCLSID(
-        __uuidof(CColorConvertDMO),
-        MFT_CATEGORY_VIDEO_PROCESSOR,
-        L"",
-        MFT_ENUM_FLAG_SYNCMFT,
-        0,
-        NULL,
-        0,
-        NULL);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = m_pWriter->SetInputMediaType(sink_stream, pType, NULL);
-  }
-
-  if (SUCCEEDED(hr)) {
-    hr = m_pWriter->BeginWriting();
-  }
-
-  SafeRelease(&pType);
+  // In callback-only mode we only need to prefer RGB32 via ConfigureSourceReader
+  // and leave the source reader configured appropriately.
+  HRESULT hr = ConfigureSourceReader(m_pReader);
   return hr;
 }
 
@@ -946,11 +667,6 @@ HRESULT CCapture::ConfigureCapture(const EncodingParameters& param) {
 HRESULT CCapture::EndCaptureInternal() {
   HRESULT hr = S_OK;
 
-  if (m_pWriter) {
-    hr = m_pWriter->Finalize();
-  }
-
-  SafeRelease(&m_pWriter);
   SafeRelease(&m_pReader);
 
   CoTaskMemFree(m_pwszSymbolicLink);
@@ -959,13 +675,18 @@ HRESULT CCapture::EndCaptureInternal() {
   return hr;
 }
 
-// Enumerate supported native media types from the active source reader.
-HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats) {
-  outFormats.clear();
+// Preference: callers should use GetSupportedFormats which returns
+// (subtype GUID, width, height, frameRate). If callers only need the
+// distinct (width,height,frameRate) triplets, they can derive them from
+// GetSupportedFormats in the wrapper layer. The dedicated
+// GetSupportedFormats helper was removed to avoid duplicated enumeration
+// logic and to keep a single authoritative enumeration path.
 
+// Enumerate native media types including the subtype GUID so callers can
+// inspect whether the device supports RGB32, YUV, MJPEG, etc.
+HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<GUID, UINT32, UINT32, double>>& outTypes) {
+  outTypes.clear();
   if (m_pReader == NULL) return E_FAIL;
-
-  std::vector<std::tuple<UINT32, UINT32, double>> temp;
 
   DWORD index = 0;
   while (true) {
@@ -973,40 +694,49 @@ HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, dou
     HRESULT hr = m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
     if (FAILED(hr)) break;
 
+    GUID subtype = {0};
     UINT32 width = 0, height = 0;
     UINT32 num = 0, denom = 0;
 
+    pType->GetGUID(MF_MT_SUBTYPE, &subtype);
     MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
     MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
     double frameRate = 0.0;
     if (denom != 0) frameRate = static_cast<double>(num) / static_cast<double>(denom);
 
-    temp.emplace_back(width, height, frameRate);
+    outTypes.emplace_back(subtype, width, height, frameRate);
 
     SafeRelease(&pType);
     ++index;
   }
 
-  // Sort and deduplicate (use small epsilon for floating-point FPS)
-  std::sort(temp.begin(), temp.end(), [](const auto& a, const auto& b) {
-    if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
+  // Sort + unique similar to GetSupportedFormats
+  std::sort(outTypes.begin(), outTypes.end(), [](const auto& a, const auto& b) {
     if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
-    return std::get<2>(a) < std::get<2>(b);
+    if (std::get<2>(a) != std::get<2>(b)) return std::get<2>(a) < std::get<2>(b);
+    if (std::get<3>(a) != std::get<3>(b)) return std::get<3>(a) < std::get<3>(b);
+    // fallback: compare GUID bytes
+    const GUID& ga = std::get<0>(a);
+    const GUID& gb = std::get<0>(b);
+    return memcmp(&ga, &gb, sizeof(GUID)) < 0;
   });
 
   const double eps = 1e-6;
-  auto last = std::unique(temp.begin(), temp.end(), [eps](const auto& a, const auto& b) {
-    return std::get<0>(a) == std::get<0>(b) && std::get<1>(a) == std::get<1>(b) && std::fabs(std::get<2>(a) - std::get<2>(b)) < eps;
+  auto last = std::unique(outTypes.begin(), outTypes.end(), [eps](const auto& a, const auto& b) {
+    return std::get<1>(a) == std::get<1>(b) && std::get<2>(a) == std::get<2>(b) && std::fabs(std::get<3>(a) - std::get<3>(b)) < eps && memcmp(&std::get<0>(a), &std::get<0>(b), sizeof(GUID)) == 0;
   });
-  temp.erase(last, temp.end());
+  outTypes.erase(last, outTypes.end());
 
-  outFormats = std::move(temp);
-  // store in internal cache as well
-  m_lastSupportedFormats = outFormats;
+  // No internal cache is maintained for supported formats; callers should
+  // use the returned outTypes directly if they need to validate.
+
   return S_OK;
 }
 
-HRESULT CCapture::SetDesiredFormat(UINT32 width, UINT32 height, double frameRate) {
+// Legacy desired-format helper removed; callers should use SetFormat with an explicit subtype
+
+// Set desired format by explicit native subtype GUID (e.g., MFVideoFormat_MJPG)
+HRESULT CCapture::SetFormat(const GUID& subtypeReq, UINT32 width, UINT32 height, double frameRate) {
   if (m_pReader == NULL) return E_FAIL;
 
   DWORD index = 0;
@@ -1016,14 +746,16 @@ HRESULT CCapture::SetDesiredFormat(UINT32 width, UINT32 height, double frameRate
     HRESULT hrType = m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
     if (FAILED(hrType)) break;
 
+    GUID subtype = {0};
     UINT32 w = 0, h = 0;
     UINT32 num = 0, denom = 0;
+    pType->GetGUID(MF_MT_SUBTYPE, &subtype);
     MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &w, &h);
     MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
     double fr = 0.0;
     if (denom != 0) fr = static_cast<double>(num) / static_cast<double>(denom);
 
-    if (w == width && h == height && std::abs(fr - frameRate) < 1e-6) {
+    if (IsEqualGUID(subtype, subtypeReq) && w == width && h == height && std::abs(fr - frameRate) < 1e-6) {
       hr = m_pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pType);
       SafeRelease(&pType);
       break;
@@ -1073,15 +805,11 @@ HRESULT CCapture::ReleaseDevice() {
     m_pReader->Release();
     m_pReader = nullptr;
   }
-  if (m_pWriter) {
-    m_pWriter->Release();
-    m_pWriter = nullptr;
-  }
+  // No writer member present
   if (m_pwszSymbolicLink) {
     CoTaskMemFree(m_pwszSymbolicLink);
     m_pwszSymbolicLink = nullptr;
   }
-  m_lastSupportedFormats.clear();
   m_rgbaBuffer.clear();
   m_frameCallback = nullptr;
   m_bFirstSample = TRUE;

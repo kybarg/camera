@@ -16,16 +16,21 @@ export interface DeviceInfo {
  * Camera format information including resolution and frame rate
  */
 export interface CameraFormat {
+  /** Native subtype GUID string (round-trippable) */
+  /** Friendly short subtype name (e.g., 'MJPEG', 'NV12', 'YUY2', 'RGB32') */
+  subtype: string;
+  /** Native subtype GUID string (round-trippable); present in getSupportedFormats entries */
+  guid?: string;
   /** Width of the camera format in pixels */
   width: number;
   /** Height of the camera format in pixels */
   height: number;
-  /** Frame rate of the camera format in frames per second */
+  /** Frame rate of the camera format in frames per second (frameRate) */
   frameRate: number;
 }
 
 /**
- * Camera dimensions
+ * Camera dimensions (current capture output)
  */
 export interface CameraDimensions {
   /** Width of the current camera format in pixels */
@@ -63,10 +68,35 @@ export interface SetFormatResult extends OperationResult {
 }
 
 /**
+ * Camera information returned by getCameraInfo()
+ * This is a flexible shape; implementations may include grouped `formats` keyed by
+ * subtype and optional `encoders` information. Use `any` fields for extensibility.
+ */
+export interface CameraInfo {
+  friendlyName?: string;
+  symbolicLink?: string;
+  /** Optional encoders supported by the camera or driver */
+  encoders?: string[];
+  /** Optional grouped formats map: subtype -> { subtype, resolutions: CameraFormat[] } */
+  formats?: CameraFormat[];
+  // legacy fields may also be present (supportedResolutions, supportedResolutionsBySubtype)
+  [k: string]: any;
+}
+
+/**
  * Camera events interface
  */
 export interface CameraEvents {
-  /** Emitted when a new frame is captured. frameData is a Buffer containing RGBA pixel data */
+  /** Emitted when a new frame/sample is captured.
+   *
+   * The payload is a Node.js Buffer containing the raw contiguous sample bytes
+   * returned by the OS/driver for the negotiated media subtype. For example:
+   * - MJPEG/MJPEG frames: JPEG bitstream bytes
+   * - NV12/YUY2: raw YUV planar/interleaved bytes
+   * - RGB32/RGB24: raw pixel bytes
+   *
+   * The exact layout depends on the chosen CameraFormat (check the `subtype`/`guid`).
+   */
   frame: (frameData: Buffer) => void;
 }
 
@@ -107,15 +137,31 @@ export declare class Camera extends EventEmitter {
   getSupportedFormats(): Promise<CameraFormat[]>;
 
   /**
+   * Get rich camera information for the claimed device.
+   * Returns a flexible object that includes at least `friendlyName` and `symbolicLink`,
+   * and may include grouped `formats` or legacy fields.
+   */
+  getCameraInfo(): Promise<CameraInfo>;
+
+  /**
    * Set the desired camera format (resolution and frame rate)
    * The camera will select the closest matching format if exact match is not available
    * @param width - Desired width in pixels
    * @param height - Desired height in pixels
-   * @param frameRate - Desired frame rate in fps
+  * @param frameRate - Desired frame rate (frameRate)
    * @returns Promise that resolves to the actual format that was set
    * @throws Error if format cannot be set
    */
-  setDesiredFormat(width: number, height: number, frameRate: number): Promise<SetFormatResult>;
+  /**
+  * Set desired format using an explicit native subtype identifier (string) plus resolution and frameRate.
+   * The subtype may be a common name like 'NV12', 'RGB24', 'RGB32', 'MJPG' or a GUID string.
+   */
+  /**
+  * Set desired format using an explicit native subtype identifier (string) plus resolution and frameRate.
+   * The subtype may be a common name like 'NV12', 'RGB24', 'RGB32', 'MJPG' or a GUID string.
+   */
+  // Accept a single CameraFormat object: { subtype, width, height, frameRate }
+  setFormat(format: CameraFormat): Promise<SetFormatResult>;
 
   /**
    * Get the current camera dimensions
@@ -124,10 +170,11 @@ export declare class Camera extends EventEmitter {
   getDimensions(): CameraDimensions;
 
   /**
-   * Start capturing frames from the camera
-   * Frames are emitted as 'frame' events with RGBA buffer data
+   * Start capturing frames from the camera.
+   * Frames are emitted via the 'frame' event with Buffer payloads.
+   * The JS wrapper passes an internal frame emitter callback into native code,
+   * so no callback parameter is required here.
    * @returns Promise that resolves when capture starts successfully
-   * @throws Error if capture cannot be started or if already capturing
    */
   startCapture(): Promise<OperationResult>;
 

@@ -95,19 +95,20 @@ class CCapture : public IMFSourceReaderCallback {
   HRESULT CheckDeviceLost(DEV_BROADCAST_HDR* pHdr, BOOL* pbDeviceLost);
   // Initialize internal reader from an IMFActivate without starting capture
   HRESULT InitFromActivate(IMFActivate* pActivate);
-  // Enumerate supported native media types from the active source reader (if any).
-  HRESULT GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats);
-  // Set the desired native media type on the source reader (width, height, frameRate)
-  HRESULT SetDesiredFormat(UINT32 width, UINT32 height, double frameRate);
+  // Enumerate native media types including subtype GUID for richer info
+  HRESULT GetSupportedFormats(std::vector<std::tuple<GUID, UINT32, UINT32, double>>& outTypes);
+  // Set the desired native media type on the source reader by explicit native subtype GUID
+  HRESULT SetFormat(const GUID& subtype, UINT32 width, UINT32 height, double frameRate);
   // Get current dimensions from the source reader (width, height, frameRate)
   HRESULT GetCurrentDimensions(UINT32* pWidth, UINT32* pHeight, double* pFrameRate);
   // Provide a callback to receive raw frame buffers (moved into the callback)
   void SetFrameCallback(std::function<void(std::vector<uint8_t>&&)> cb) { m_frameCallback = std::move(cb); }
   // Return last enumerated supported formats (stored internally)
-  const std::vector<std::tuple<UINT32, UINT32, double>>& GetLastSupportedFormats() const { return m_lastSupportedFormats; }
+  // Deprecated: removed internal cached supported formats
   // (EnumerateFormatsFromActivate removed; CCapture now supports InitFromActivate and GetSupportedFormats)
   // Release all claimed device resources and reset state
   HRESULT ReleaseDevice();
+  HRESULT EndCaptureInternal();
 
  protected:
   enum State {
@@ -126,7 +127,6 @@ class CCapture : public IMFSourceReaderCallback {
 
   HRESULT OpenMediaSource(IMFMediaSource* pSource);
   HRESULT ConfigureCapture(const EncodingParameters& param);
-  HRESULT EndCaptureInternal();
 
   long m_nRefCount;  // Reference count.
   CRITICAL_SECTION m_critsec;
@@ -134,14 +134,12 @@ class CCapture : public IMFSourceReaderCallback {
   HWND m_hwndEvent;  // Application window to receive events.
 
   IMFSourceReader* m_pReader;
-  IMFSinkWriter* m_pWriter;
 
   BOOL m_bFirstSample;
   LONGLONG m_llBaseTime;
 
   WCHAR* m_pwszSymbolicLink;
-  // Cache of last enumerated formats
-  std::vector<std::tuple<UINT32, UINT32, double>> m_lastSupportedFormats;
+  // (removed) cache of last enumerated formats
   // Frame callback used when delivering frames to the embedding (JS)
   std::function<void(std::vector<uint8_t>&&)> m_frameCallback;
   // Reusable RGBA buffer for frame conversion

@@ -35,9 +35,10 @@ async function zeroLengthTest(durationMs = 5000) {
         `Selecting format ${best.width}x${best.height} @ ${best.frameRate}`
       );
       try {
-        await camera.setDesiredFormat(best.width, best.height, best.frameRate);
+        // Use the CameraFormat object directly with the new setFormat API
+        await camera.setFormat(best);
       } catch (e) {
-        console.warn("Failed to set desired format:", e.message || e);
+        console.warn("Failed to set format:", e.message || e);
       }
     }
 

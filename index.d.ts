@@ -140,7 +140,6 @@ export declare class Camera extends EventEmitter {
    * @returns Promise that resolves to the actual format that was set
    * @throws Error if format cannot be set
    */
-  setDesiredFormat(width: number, height: number, frameRate: number): Promise<SetFormatResult>;
   /**
   * Set desired format using an explicit native subtype identifier (string) plus resolution and frameRate.
    * The subtype may be a common name like 'NV12', 'RGB24', 'RGB32', 'MJPG' or a GUID string.

@@ -99,8 +99,6 @@ class CCapture : public IMFSourceReaderCallback {
   HRESULT GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats);
   // Enumerate native media types including subtype GUID for richer info
   HRESULT GetSupportedNativeTypes(std::vector<std::tuple<GUID, UINT32, UINT32, double>>& outTypes);
-  // Set the desired native media type on the source reader (width, height, frameRate)
-  HRESULT SetDesiredFormat(UINT32 width, UINT32 height, double frameRate);
   // Set the desired native media type on the source reader by explicit native subtype GUID
   HRESULT SetFormat(const GUID& subtype, UINT32 width, UINT32 height, double frameRate);
   // Get current dimensions from the source reader (width, height, frameRate)

@@ -204,8 +204,11 @@ interface CameraFormat {
 }
 ```
 
-#### `setDesiredFormat(width: number, height: number, frameRate: number): Promise<SetFormatResult>`
-Sets desired camera format (selects closest match).
+#### `setFormat(format: CameraFormat): Promise<SetFormatResult>`
+Sets the camera format using a CameraFormat object returned from `getSupportedFormats()` or a user-constructed object. The CameraFormat now includes a `subtype` field (string) identifying the native pixel format (for example: "nv12", "rgb24", "rgb32", or a GUID string).
+
+**Parameters:**
+- `format: CameraFormat` — an object with `subtype`, `width`, `height`, and `frameRate` fields.
 
 **Returns:**
 ```typescript

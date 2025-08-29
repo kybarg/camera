@@ -31,8 +31,8 @@ async function measure() {
     } else {
       if (formatIndex !== null && formats[formatIndex]) {
         const f = formats[formatIndex];
-        console.log('Setting desired format to', f);
-        await cam.setDesiredFormat(f.width, f.height, f.frameRate);
+        console.log('Setting format to', f);
+        await cam.setFormat(f);
       } else {
         console.log('No format index given; using current/default format');
       }

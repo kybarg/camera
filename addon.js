@@ -57,9 +57,6 @@ class Camera extends EventEmitter {
 
       return out;
     };
-    this.setDesiredFormat = this._nativeCamera.setDesiredFormatAsync.bind(
-      this._nativeCamera
-    );
     // Expose native subtype-aware format setter
     this.setFormat = this._nativeCamera.setFormatAsync.bind(
       this._nativeCamera

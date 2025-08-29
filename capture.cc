@@ -737,9 +737,9 @@ HRESULT ConfigureSourceReader(IMFSourceReader* pReader) {
   // camera's output format. That is outside the scope of this
   // sample, however.
 
-  // Prefer an already-set current media type (e.g. set via SetDesiredFormat).
-  // This ensures SetDesiredFormat takes effect instead of being overridden
-  // by ConfigureSourceReader enumerating native types.
+  // Prefer an already-set current media type (e.g. set via SetFormat).
+  // This ensures a previously selected media type is preserved instead of being
+  // overridden by ConfigureSourceReader enumerating native types.
   HRESULT hrCurr = pReader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType);
   if (SUCCEEDED(hrCurr) && pType) {
     hr = pType->GetGUID(MF_MT_SUBTYPE, &subtype);
@@ -964,35 +964,7 @@ HRESULT CCapture::GetSupportedNativeTypes(std::vector<std::tuple<GUID, UINT32, U
   return S_OK;
 }
 
-HRESULT CCapture::SetDesiredFormat(UINT32 width, UINT32 height, double frameRate) {
-  if (m_pReader == NULL) return E_FAIL;
-
-  DWORD index = 0;
-  HRESULT hr = E_FAIL;
-  while (true) {
-    IMFMediaType* pType = NULL;
-    HRESULT hrType = m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
-    if (FAILED(hrType)) break;
-
-    UINT32 w = 0, h = 0;
-    UINT32 num = 0, denom = 0;
-    MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &w, &h);
-    MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
-    double fr = 0.0;
-    if (denom != 0) fr = static_cast<double>(num) / static_cast<double>(denom);
-
-    if (w == width && h == height && std::abs(fr - frameRate) < 1e-6) {
-      hr = m_pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pType);
-      SafeRelease(&pType);
-      break;
-    }
-
-    SafeRelease(&pType);
-    ++index;
-  }
-
-  return hr;
-}
+// Legacy desired-format helper removed; callers should use SetFormat with an explicit subtype
 
 // Set desired format by explicit native subtype GUID (e.g., MFVideoFormat_MJPG)
 HRESULT CCapture::SetFormat(const GUID& subtypeReq, UINT32 width, UINT32 height, double frameRate) {

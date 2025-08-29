@@ -40,7 +40,7 @@ static std::string SubtypeGuidToName(const GUID& g) {
 }
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
-  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("getCameraInfoAsync", &Camera::GetCameraInfoAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("setDesiredFormatAsync", &Camera::SetDesiredFormatAsync), InstanceMethod("setFormatAsync", &Camera::SetFormatAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync)});
+  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("getCameraInfoAsync", &Camera::GetCameraInfoAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("setFormatAsync", &Camera::SetFormatAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync)});
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
   *constructor = Napi::Persistent(func);
@@ -499,75 +499,7 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
   return deferred.Promise();
 }
 
-Napi::Value Camera::SetDesiredFormatAsync(const Napi::CallbackInfo& info) {
-  Napi::Env env = info.Env();
 
-  if (info.Length() < 3 || !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsNumber()) {
-    Napi::TypeError::New(env, "Expected width, height, and frameRate as numbers").ThrowAsJavaScriptException();
-    return env.Null();
-  }
-
-  UINT32 width = info[0].As<Napi::Number>().Uint32Value();
-  UINT32 height = info[1].As<Napi::Number>().Uint32Value();
-  double frameRate = info[2].As<Napi::Number>().DoubleValue();
-
-  auto deferred = Napi::Promise::Deferred::New(env);
-
-  auto tsfnPromise = Napi::ThreadSafeFunction::New(
-      env,
-      Napi::Function(),
-      "SetDesiredFormatAsync",
-      0,
-      1);
-
-  std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), width, height, frameRate]() mutable {
-    try {
-      // Delegate to CCapture to set the desired format
-      if (!this->device) {
-        auto callback = [deferred = std::move(deferred)](Napi::Env env, Napi::Function) mutable {
-          deferred.Reject(Napi::Error::New(env, "Device not initialized").Value());
-        };
-        tsfnPromise.BlockingCall(callback);
-        tsfnPromise.Release();
-        return;
-      }
-
-  // No longer validate against an internal cache; allow callers to request
-  // any format and rely on the underlying CCapture::SetDesiredFormat to
-  // succeed or fail with an HRESULT.
-
-      HRESULT hr = this->device->SetDesiredFormat(width, height, frameRate);
-      if (FAILED(hr)) {
-        auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
-          std::string msg = HResultToString(hr);
-          deferred.Reject(Napi::Error::New(env, msg).Value());
-        };
-        tsfnPromise.BlockingCall(callback);
-        tsfnPromise.Release();
-        return;
-      }
-
-      auto callback = [deferred = std::move(deferred), width, height](Napi::Env env, Napi::Function) mutable {
-        Napi::Object result = Napi::Object::New(env);
-        result.Set("success", Napi::Boolean::New(env, true));
-        result.Set("actualWidth", Napi::Number::New(env, width));
-        result.Set("actualHeight", Napi::Number::New(env, height));
-        deferred.Resolve(result);
-      };
-
-      tsfnPromise.BlockingCall(callback);
-    } catch (const std::exception& e) {
-      auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
-        deferred.Reject(Napi::Error::New(env, message).Value());
-      };
-      tsfnPromise.BlockingCall(callback);
-    }
-
-    tsfnPromise.Release();
-  }).detach();
-
-  return deferred.Promise();
-}
 
 // Helper: map common subtype strings to GUIDs
 static bool ParseSubtypeString(const std::string& s, GUID& out) {

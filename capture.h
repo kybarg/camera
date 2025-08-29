@@ -95,10 +95,8 @@ class CCapture : public IMFSourceReaderCallback {
   HRESULT CheckDeviceLost(DEV_BROADCAST_HDR* pHdr, BOOL* pbDeviceLost);
   // Initialize internal reader from an IMFActivate without starting capture
   HRESULT InitFromActivate(IMFActivate* pActivate);
-  // Enumerate supported native media types from the active source reader (if any).
-  HRESULT GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats);
   // Enumerate native media types including subtype GUID for richer info
-  HRESULT GetSupportedNativeTypes(std::vector<std::tuple<GUID, UINT32, UINT32, double>>& outTypes);
+  HRESULT GetSupportedFormats(std::vector<std::tuple<GUID, UINT32, UINT32, double>>& outTypes);
   // Set the desired native media type on the source reader by explicit native subtype GUID
   HRESULT SetFormat(const GUID& subtype, UINT32 width, UINT32 height, double frameRate);
   // Get current dimensions from the source reader (width, height, frameRate)

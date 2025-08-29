@@ -868,54 +868,16 @@ HRESULT CCapture::EndCaptureInternal() {
   return hr;
 }
 
-// Enumerate supported native media types from the active source reader.
-HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats) {
-  outFormats.clear();
-
-  if (m_pReader == NULL) return E_FAIL;
-
-  std::vector<std::tuple<UINT32, UINT32, double>> temp;
-
-  DWORD index = 0;
-  while (true) {
-    IMFMediaType* pType = NULL;
-    HRESULT hr = m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
-    if (FAILED(hr)) break;
-
-    UINT32 width = 0, height = 0;
-    UINT32 num = 0, denom = 0;
-
-    MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
-    MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
-    double frameRate = 0.0;
-    if (denom != 0) frameRate = static_cast<double>(num) / static_cast<double>(denom);
-
-    temp.emplace_back(width, height, frameRate);
-
-    SafeRelease(&pType);
-    ++index;
-  }
-
-  // Sort and deduplicate (use small epsilon for floating-point frameRate)
-  std::sort(temp.begin(), temp.end(), [](const auto& a, const auto& b) {
-    if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
-    if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
-    return std::get<2>(a) < std::get<2>(b);
-  });
-
-  const double eps = 1e-6;
-  auto last = std::unique(temp.begin(), temp.end(), [eps](const auto& a, const auto& b) {
-    return std::get<0>(a) == std::get<0>(b) && std::get<1>(a) == std::get<1>(b) && std::fabs(std::get<2>(a) - std::get<2>(b)) < eps;
-  });
-  temp.erase(last, temp.end());
-
-  outFormats = std::move(temp);
-  return S_OK;
-}
+// Preference: callers should use GetSupportedFormats which returns
+// (subtype GUID, width, height, frameRate). If callers only need the
+// distinct (width,height,frameRate) triplets, they can derive them from
+// GetSupportedFormats in the wrapper layer. The dedicated
+// GetSupportedFormats helper was removed to avoid duplicated enumeration
+// logic and to keep a single authoritative enumeration path.
 
 // Enumerate native media types including the subtype GUID so callers can
 // inspect whether the device supports RGB32, YUV, MJPEG, etc.
-HRESULT CCapture::GetSupportedNativeTypes(std::vector<std::tuple<GUID, UINT32, UINT32, double>>& outTypes) {
+HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<GUID, UINT32, UINT32, double>>& outTypes) {
   outTypes.clear();
   if (m_pReader == NULL) return E_FAIL;
 

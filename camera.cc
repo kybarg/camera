@@ -101,7 +101,7 @@ Napi::Value Camera::GetCameraInfoAsync(const Napi::CallbackInfo& info) {
       std::vector<std::tuple<GUID, UINT32, UINT32, double>> types;
       HRESULT hrTypes = S_OK;
       if (this->device) {
-        hrTypes = this->device->GetSupportedNativeTypes(types);
+        hrTypes = this->device->GetSupportedFormats(types);
       }
 
       auto cb = [deferred = std::move(deferred), friendlyUtf8 = std::move(friendlyUtf8), symbolicUtf8 = std::move(symbolicUtf8), types = std::move(types), hrTypes](Napi::Env env, Napi::Function) mutable {
@@ -434,7 +434,7 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
       HRESULT hr = S_OK;
 
       if (this->device != nullptr) {
-        hr = this->device->GetSupportedNativeTypes(types);
+        hr = this->device->GetSupportedFormats(types);
       } else {
         auto callback = [deferred = std::move(deferred)](Napi::Env env, Napi::Function) mutable {
           deferred.Reject(Napi::Error::New(env, "No initialized device. Call claimDeviceAsync first to initialize the device before enumerating formats.").Value());

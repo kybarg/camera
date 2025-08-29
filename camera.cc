@@ -558,8 +558,8 @@ Napi::Value Camera::SetFormatAsync(const Napi::CallbackInfo& info) {
   {
     Napi::Object obj = info[0].As<Napi::Object>();
     // Accept either a 'guid' string (preferred) or a 'subtype' friendly name
-    if (obj.Has("guid") && obj.Get("guid`).IsString()) {
-      subtypeStr = ""; // leave subtypeStr empty and parse guid below
+    if (obj.Has("guid") && obj.Get("guid").IsString()) {
+      subtypeStr = "";  // leave subtypeStr empty and parse guid below
     } else if (!(obj.Has("subtype") && obj.Get("subtype").IsString())) {
       Napi::TypeError::New(env, "Format object must include either 'guid' string or 'subtype' string").ThrowAsJavaScriptException();
       return env.Null();

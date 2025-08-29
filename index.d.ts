@@ -16,16 +16,18 @@ export interface DeviceInfo {
  * Camera format information including resolution and frame rate
  */
 export interface CameraFormat {
+  /** Native subtype GUID string (round-trippable) */
+  subtype: string;
   /** Width of the camera format in pixels */
   width: number;
   /** Height of the camera format in pixels */
   height: number;
-  /** Frame rate of the camera format in frames per second */
+  /** Frame rate of the camera format in frames per second (frameRate) */
   frameRate: number;
 }
 
 /**
- * Camera dimensions
+ * Camera dimensions (current capture output)
  */
 export interface CameraDimensions {
   /** Width of the current camera format in pixels */
@@ -73,7 +75,7 @@ export interface CameraInfo {
   /** Optional encoders supported by the camera or driver */
   encoders?: string[];
   /** Optional grouped formats map: subtype -> { subtype, resolutions: CameraFormat[] } */
-  formats?: { [subtype: string]: { subtype: string; resolutions: CameraFormat[] } };
+  formats?: CameraFormat[];
   // legacy fields may also be present (supportedResolutions, supportedResolutionsBySubtype)
   [k: string]: any;
 }
@@ -134,11 +136,21 @@ export declare class Camera extends EventEmitter {
    * The camera will select the closest matching format if exact match is not available
    * @param width - Desired width in pixels
    * @param height - Desired height in pixels
-   * @param frameRate - Desired frame rate in fps
+  * @param frameRate - Desired frame rate (frameRate)
    * @returns Promise that resolves to the actual format that was set
    * @throws Error if format cannot be set
    */
   setDesiredFormat(width: number, height: number, frameRate: number): Promise<SetFormatResult>;
+  /**
+  * Set desired format using an explicit native subtype identifier (string) plus resolution and frameRate.
+   * The subtype may be a common name like 'NV12', 'RGB24', 'RGB32', 'MJPG' or a GUID string.
+   */
+  /**
+  * Set desired format using an explicit native subtype identifier (string) plus resolution and frameRate.
+   * The subtype may be a common name like 'NV12', 'RGB24', 'RGB32', 'MJPG' or a GUID string.
+   */
+  // Accept a single CameraFormat object: { subtype, width, height, frameRate }
+  setFormat(format: CameraFormat): Promise<SetFormatResult>;
 
   /**
    * Get the current camera dimensions

@@ -47,8 +47,8 @@ async function takeCameraSnapshot(): Promise<void> {
       // Native returns friendlyName, symbolicLink, model, encoders, supportedResolutions
       const name = (info && (info.name || info.friendlyName)) || "<unknown>";
       const encoders = (info && (info.encoders || [])) as string[];
-      // Single canonical `formats` map: { friendlyName: { subtype, resolutions: [...] } }
-      const formatsMap = (info && (info.formats || {})) as { [k: string]: any };
+  // Camera info returns formats as a flat CameraFormat[]
+  const infoFormats: CameraFormat[] = Array.isArray(info && info.formats) ? (info.formats as CameraFormat[]) : [];
 
       console.log("   🔎 Camera info:");
       console.log(`     name: ${name}`);
@@ -57,27 +57,25 @@ async function takeCameraSnapshot(): Promise<void> {
       } else {
         console.log("     encoders: <none>");
       }
-      // Print canonical formats map: list each subtype and its resolutions
-      const formatKeys = Object.keys(formatsMap);
-      if (formatKeys.length > 0) {
+
+      // Print grouped formats by subtype for readability
+      if (infoFormats.length > 0) {
         console.log("     formats (grouped by subtype):");
-        for (const key of formatKeys) {
-          const group = formatsMap[key] || {};
-          const res = Array.isArray(group.resolutions) ? group.resolutions : [];
-          console.log(
-            `       ${key}  (subtype=${group.subtype || "<unknown>"})`
-          );
-          if (res.length === 0) {
-            console.log("         <no resolutions>");
-            continue;
+        const bySubtype: { [s: string]: CameraFormat[] } = {};
+        for (const f of infoFormats) {
+          const s = f.subtype || "<unknown>";
+          if (!bySubtype[s]) bySubtype[s] = [];
+          bySubtype[s].push(f);
+        }
+        for (const s of Object.keys(bySubtype)) {
+          const group = bySubtype[s];
+          console.log(`       subtype=${s}  (${group.length} entries)`);
+          const sample = group.slice(0, 6);
+          for (const r of sample) {
+            const fr = (r as any).frameRate !== undefined ? (r as any).frameRate : 0;
+            console.log(`         - ${r.width}x${r.height} @ ${fr} frameRate`);
           }
-          // Show up to 6 resolutions per subtype for brevity
-          for (const r of res.slice(0, 6)) {
-            console.log(
-              `         - ${r.width}x${r.height} @ ${r.frameRate}fps`
-            );
-          }
-          if (res.length > 6) console.log(`         ... and ${res.length - 6} more`);
+          if (group.length > 6) console.log(`         ... and ${group.length - 6} more`);
         }
       } else {
         console.log("     formats: <none>");
@@ -99,12 +97,12 @@ async function takeCameraSnapshot(): Promise<void> {
       // On tie, prefer the one with the higher frameRate.
       let bestFormat: CameraFormat = formats[0];
       let maxPixels: number = bestFormat.width * bestFormat.height;
-      let overallMaxFps: number = bestFormat.frameRate || 0;
+  let overallMaxFrameRate: number = bestFormat.frameRate || 0;
 
       for (const format of formats) {
         const pixels: number = format.width * format.height;
-        const fr: number = format.frameRate || 0;
-        overallMaxFps = Math.max(overallMaxFps, fr);
+  const fr: number = format.frameRate || 0;
+  overallMaxFrameRate = Math.max(overallMaxFrameRate, fr);
         if (
           pixels > maxPixels ||
           (pixels === maxPixels && fr > (bestFormat.frameRate || 0))
@@ -114,30 +112,26 @@ async function takeCameraSnapshot(): Promise<void> {
         }
       }
 
-      // Compute best fps available for the selected resolution
-      let bestFpsForResolution = 0;
+      // Compute best frameRate available for the selected resolution
+      let bestFrameRateForResolution = 0;
       for (const format of formats) {
         if (format.width === bestFormat.width && format.height === bestFormat.height) {
-          bestFpsForResolution = Math.max(bestFpsForResolution, format.frameRate || 0);
+          bestFrameRateForResolution = Math.max(bestFrameRateForResolution, format.frameRate || 0);
         }
       }
 
       console.log(
-        `   🎯 Selected: ${bestFormat.width}x${bestFormat.height} @ ${bestFpsForResolution}fps (${maxPixels.toLocaleString()} pixels)`
+        `   🎯 Selected: ${bestFormat.width}x${bestFormat.height} @ ${bestFrameRateForResolution} frameRate (${maxPixels.toLocaleString()} pixels)`
       );
-      console.log(`     🔢 Best fps for this resolution: ${bestFpsForResolution}fps`);
-      console.log(`     🌐 Best fps overall available: ${overallMaxFps}fps`);
+      console.log(`     🔢 Best frameRate for this resolution: ${bestFrameRateForResolution}`);
+      console.log(`     🌐 Best frameRate overall available: ${overallMaxFrameRate}`);
 
       try {
-        await camera.setDesiredFormat(
-          bestFormat.width,
-          bestFormat.height,
-          bestFpsForResolution
-        );
+        await camera.setFormat(bestFormat);
         console.log("✅ Format set successfully");
       } catch (error) {
         console.log(
-          `⚠️ Could not set desired format, using default: ${(error as Error).message}`
+          `⚠️ Could not set format, using default: ${(error as Error).message}`
         );
       }
     } else {

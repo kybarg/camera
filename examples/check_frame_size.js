@@ -29,9 +29,9 @@ async function runTest() {
 
     // Pick first supported format (you can change index to test different formats)
     const chosen = formats[0];
-    console.log('Setting desired format to', chosen);
+    console.log('Setting format to', chosen);
 
-    await cam.setDesiredFormat(chosen.width, chosen.height, chosen.frameRate);
+    await cam.setFormat(chosen);
 
     const dims = await cam.getDimensions();
     console.log('getDimensions reports:', dims);

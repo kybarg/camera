@@ -896,7 +896,7 @@ HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, dou
     ++index;
   }
 
-  // Sort and deduplicate (use small epsilon for floating-point FPS)
+  // Sort and deduplicate (use small epsilon for floating-point frameRate)
   std::sort(temp.begin(), temp.end(), [](const auto& a, const auto& b) {
     if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
     if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
@@ -910,8 +910,6 @@ HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, dou
   temp.erase(last, temp.end());
 
   outFormats = std::move(temp);
-  // store in internal cache as well
-  m_lastSupportedFormats = outFormats;
   return S_OK;
 }
 
@@ -960,6 +958,9 @@ HRESULT CCapture::GetSupportedNativeTypes(std::vector<std::tuple<GUID, UINT32, U
   });
   outTypes.erase(last, outTypes.end());
 
+  // No internal cache is maintained for supported formats; callers should
+  // use the returned outTypes directly if they need to validate.
+
   return S_OK;
 }
 
@@ -981,6 +982,39 @@ HRESULT CCapture::SetDesiredFormat(UINT32 width, UINT32 height, double frameRate
     if (denom != 0) fr = static_cast<double>(num) / static_cast<double>(denom);
 
     if (w == width && h == height && std::abs(fr - frameRate) < 1e-6) {
+      hr = m_pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pType);
+      SafeRelease(&pType);
+      break;
+    }
+
+    SafeRelease(&pType);
+    ++index;
+  }
+
+  return hr;
+}
+
+// Set desired format by explicit native subtype GUID (e.g., MFVideoFormat_MJPG)
+HRESULT CCapture::SetFormat(const GUID& subtypeReq, UINT32 width, UINT32 height, double frameRate) {
+  if (m_pReader == NULL) return E_FAIL;
+
+  DWORD index = 0;
+  HRESULT hr = E_FAIL;
+  while (true) {
+    IMFMediaType* pType = NULL;
+    HRESULT hrType = m_pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &pType);
+    if (FAILED(hrType)) break;
+
+    GUID subtype = {0};
+    UINT32 w = 0, h = 0;
+    UINT32 num = 0, denom = 0;
+    pType->GetGUID(MF_MT_SUBTYPE, &subtype);
+    MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &w, &h);
+    MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &denom);
+    double fr = 0.0;
+    if (denom != 0) fr = static_cast<double>(num) / static_cast<double>(denom);
+
+    if (IsEqualGUID(subtype, subtypeReq) && w == width && h == height && std::abs(fr - frameRate) < 1e-6) {
       hr = m_pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pType);
       SafeRelease(&pType);
       break;
@@ -1035,7 +1069,6 @@ HRESULT CCapture::ReleaseDevice() {
     CoTaskMemFree(m_pwszSymbolicLink);
     m_pwszSymbolicLink = nullptr;
   }
-  m_lastSupportedFormats.clear();
   m_rgbaBuffer.clear();
   m_frameCallback = nullptr;
   m_bFirstSample = TRUE;

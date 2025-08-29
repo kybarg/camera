@@ -58,11 +58,22 @@ async function zeroLengthTest(durationMs = 5000) {
     console.log(`Capturing for ${durationMs}ms...`);
 
     await new Promise((res) => setTimeout(res, durationMs));
+    console.log(`Done capturing ...`);
 
-    await camera.stopCapture();
-    await camera.releaseDevice();
+  // Time stopCapture() and releaseDevice() to detect slow shutdowns
+  const tStopStart = process.hrtime.bigint();
+  await camera.stopCapture();
+  const tStopEnd = process.hrtime.bigint();
+  const stopMs = Number(tStopEnd - tStopStart) / 1e6;
 
-    console.log("Test complete:");
+  const tRelStart = process.hrtime.bigint();
+  await camera.releaseDevice();
+  const tRelEnd = process.hrtime.bigint();
+  const relMs = Number(tRelEnd - tRelStart) / 1e6;
+
+  console.log('Test complete:');
+  console.log(`  stopCapture() duration: ${stopMs.toFixed(2)} ms`);
+  console.log(`  releaseDevice() duration: ${relMs.toFixed(2)} ms`);
     console.log(`  Total frames: ${totalFrames}`);
     console.log(`  Zero-length frames: ${zeroLengthFrames}`);
     console.log(`  Non-empty frames: ${totalFrames - zeroLengthFrames}`);

@@ -63,6 +63,22 @@ export interface SetFormatResult extends OperationResult {
 }
 
 /**
+ * Camera information returned by getCameraInfo()
+ * This is a flexible shape; implementations may include grouped `formats` keyed by
+ * subtype and optional `encoders` information. Use `any` fields for extensibility.
+ */
+export interface CameraInfo {
+  friendlyName?: string;
+  symbolicLink?: string;
+  /** Optional encoders supported by the camera or driver */
+  encoders?: string[];
+  /** Optional grouped formats map: subtype -> { subtype, resolutions: CameraFormat[] } */
+  formats?: { [subtype: string]: { subtype: string; resolutions: CameraFormat[] } };
+  // legacy fields may also be present (supportedResolutions, supportedResolutionsBySubtype)
+  [k: string]: any;
+}
+
+/**
  * Camera events interface
  */
 export interface CameraEvents {
@@ -107,6 +123,13 @@ export declare class Camera extends EventEmitter {
   getSupportedFormats(): Promise<CameraFormat[]>;
 
   /**
+   * Get rich camera information for the claimed device.
+   * Returns a flexible object that includes at least `friendlyName` and `symbolicLink`,
+   * and may include grouped `formats` or legacy fields.
+   */
+  getCameraInfo(): Promise<CameraInfo>;
+
+  /**
    * Set the desired camera format (resolution and frame rate)
    * The camera will select the closest matching format if exact match is not available
    * @param width - Desired width in pixels
@@ -124,10 +147,11 @@ export declare class Camera extends EventEmitter {
   getDimensions(): CameraDimensions;
 
   /**
-   * Start capturing frames from the camera
-   * Frames are emitted as 'frame' events with RGBA buffer data
+   * Start capturing frames from the camera.
+   * Frames are emitted via the 'frame' event with Buffer payloads.
+   * The JS wrapper passes an internal frame emitter callback into native code,
+   * so no callback parameter is required here.
    * @returns Promise that resolves when capture starts successfully
-   * @throws Error if capture cannot be started or if already capturing
    */
   startCapture(): Promise<OperationResult>;
 

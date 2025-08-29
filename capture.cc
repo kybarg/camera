@@ -613,11 +613,11 @@ HRESULT CCapture::EndCaptureSession() {
   if (m_pReader) {
     // Flush queued samples for the video stream.
     HRESULT hrFlush = m_pReader->Flush(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
-    (void)hrFlush; // non-fatal
+    (void)hrFlush;  // non-fatal
 
     // Deselect the stream so ReadSample will not deliver further frames.
     HRESULT hrSel = m_pReader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, FALSE);
-    (void)hrSel; // non-fatal
+    (void)hrSel;  // non-fatal
   }
 
   // Reset internal timing state so next start will rebase timestamps.

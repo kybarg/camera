@@ -594,19 +594,17 @@ HRESULT CCapture::InitFromActivate(IMFActivate* pActivate) {
 // To start another capture session, call SetCaptureFile.
 //-------------------------------------------------------------------
 
-HRESULT CCapture::EndCaptureSession()
-{
-    EnterCriticalSection(&m_critsec);
+HRESULT CCapture::EndCaptureSession() {
+  EnterCriticalSection(&m_critsec);
 
-    HRESULT hr = S_OK;
+  HRESULT hr = S_OK;
 
-    SafeRelease(&m_pReader);
+  SafeRelease(&m_pReader);
 
-    LeaveCriticalSection(&m_critsec);
+  LeaveCriticalSection(&m_critsec);
 
-    return hr;
+  return hr;
 }
-
 
 BOOL CCapture::IsCapturing() {
   EnterCriticalSection(&m_critsec);
@@ -836,18 +834,16 @@ HRESULT CCapture::ConfigureCapture(const EncodingParameters& param) {
 // Stops capture.
 //-------------------------------------------------------------------
 
-HRESULT CCapture::EndCaptureInternal()
-{
-    HRESULT hr = S_OK;
+HRESULT CCapture::EndCaptureInternal() {
+  HRESULT hr = S_OK;
 
-    SafeRelease(&m_pReader);
+  SafeRelease(&m_pReader);
 
-    CoTaskMemFree(m_pwszSymbolicLink);
-    m_pwszSymbolicLink = NULL;
+  CoTaskMemFree(m_pwszSymbolicLink);
+  m_pwszSymbolicLink = NULL;
 
-    return hr;
+  return hr;
 }
-
 
 // Enumerate supported native media types from the active source reader.
 HRESULT CCapture::GetSupportedFormats(std::vector<std::tuple<UINT32, UINT32, double>>& outFormats) {

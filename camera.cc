@@ -13,7 +13,7 @@
 // Helper: map common media subtype GUIDs to friendly encoder names
 static std::string SubtypeGuidToName(const GUID& g) {
   // MEDIASUBTYPE_MJPG / MFVideoFormat_MJPG GUID value (bytes: 'MJPG')
-  static const GUID MJPG_GUID = {0x47504A4D, 0x0000, 0x0010, {0x80,0x00,0x00,0xAA,0x00,0x38,0x9B,0x71}};
+  static const GUID MJPG_GUID = {0x47504A4D, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
 
   if (g == MFVideoFormat_RGB32) return "RGB32";
   if (g == MFVideoFormat_RGB24) return "RGB24";
@@ -68,12 +68,12 @@ Napi::Value Camera::GetCameraInfoAsync(const Napi::CallbackInfo& info) {
       }
 
       // Extract device-level attributes from claimedActivate
-  WCHAR* pFriendly = nullptr;
-  WCHAR* pSymbolic = nullptr;
-  std::string friendlyUtf8, symbolicUtf8;
+      WCHAR* pFriendly = nullptr;
+      WCHAR* pSymbolic = nullptr;
+      std::string friendlyUtf8, symbolicUtf8;
 
-  HRESULT hr1 = this->claimedActivate->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &pFriendly, nullptr);
-  HRESULT hr2 = this->claimedActivate->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, &pSymbolic, nullptr);
+      HRESULT hr1 = this->claimedActivate->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &pFriendly, nullptr);
+      HRESULT hr2 = this->claimedActivate->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, &pSymbolic, nullptr);
 
       if (SUCCEEDED(hr1) && pFriendly) {
         int len = WideCharToMultiByte(CP_UTF8, 0, pFriendly, -1, NULL, 0, NULL, NULL);
@@ -104,15 +104,15 @@ Napi::Value Camera::GetCameraInfoAsync(const Napi::CallbackInfo& info) {
         hrTypes = this->device->GetSupportedNativeTypes(types);
       }
 
-  auto cb = [deferred = std::move(deferred), friendlyUtf8 = std::move(friendlyUtf8), symbolicUtf8 = std::move(symbolicUtf8), types = std::move(types), hrTypes](Napi::Env env, Napi::Function) mutable {
+      auto cb = [deferred = std::move(deferred), friendlyUtf8 = std::move(friendlyUtf8), symbolicUtf8 = std::move(symbolicUtf8), types = std::move(types), hrTypes](Napi::Env env, Napi::Function) mutable {
         if (FAILED(hrTypes)) {
           deferred.Reject(Napi::Error::New(env, "Failed to enumerate native types").Value());
           return;
         }
 
         Napi::Object out = Napi::Object::New(env);
-  out.Set("friendlyName", Napi::String::New(env, friendlyUtf8));
-  out.Set("symbolicLink", Napi::String::New(env, symbolicUtf8));
+        out.Set("friendlyName", Napi::String::New(env, friendlyUtf8));
+        out.Set("symbolicLink", Napi::String::New(env, symbolicUtf8));
 
         // Map of encoders/formats supported (collect unique subtype GUIDs)
         Napi::Array enc = Napi::Array::New(env);
@@ -121,7 +121,10 @@ Napi::Value Camera::GetCameraInfoAsync(const Napi::CallbackInfo& info) {
           const GUID& g = std::get<0>(types[i]);
           bool found = false;
           for (const auto& sg : seenGuids) {
-            if (memcmp(&sg, &g, sizeof(GUID)) == 0) { found = true; break; }
+            if (memcmp(&sg, &g, sizeof(GUID)) == 0) {
+              found = true;
+              break;
+            }
           }
           if (!found) {
             std::string name = SubtypeGuidToName(g);
@@ -689,8 +692,8 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
 
   // Move the actual StartCapture call to a worker thread that initializes COM.
   std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise)]() mutable {
-  HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-  bool coInitialized = SUCCEEDED(hrCo);
+    HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    bool coInitialized = SUCCEEDED(hrCo);
 
     HRESULT hr = S_OK;
     EncodingParameters params = {0, 0};
@@ -698,9 +701,9 @@ Napi::Value Camera::StartCaptureAsync(const Napi::CallbackInfo& info) {
     if (!this->device) {
       hr = E_FAIL;
     } else {
-  // about to call device->StartCapture
+      // about to call device->StartCapture
       hr = this->device->StartCapture(this->claimedActivate, params);
-  // device->StartCapture returned (hr logged by caller if needed)
+      // device->StartCapture returned (hr logged by caller if needed)
     }
 
     if (FAILED(hr)) {

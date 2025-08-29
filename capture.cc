@@ -536,6 +536,12 @@ HRESULT CCapture::StartCapture(
 
     // Request the first video frame.
 
+    // Ensure the video stream is selected (in case Stop deselected it).
+    if (m_pReader) {
+      HRESULT hrSel = m_pReader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
+      // ignore hrSel if it fails; ReadSample will surface errors.
+    }
+
     hr = m_pReader->ReadSample(
         (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
         0,
@@ -599,7 +605,24 @@ HRESULT CCapture::EndCaptureSession() {
 
   HRESULT hr = S_OK;
 
-  SafeRelease(&m_pReader);
+  // Instead of releasing the source reader outright, flush and deselect the
+  // video stream so the reader stops delivering frames. This allows the
+  // reader to be reused by a subsequent StartCapture without re-creating
+  // the media source/reader, avoiding "already listening" event-generator
+  // errors and improving start/stop reliability.
+  if (m_pReader) {
+    // Flush queued samples for the video stream.
+    HRESULT hrFlush = m_pReader->Flush(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
+    (void)hrFlush; // non-fatal
+
+    // Deselect the stream so ReadSample will not deliver further frames.
+    HRESULT hrSel = m_pReader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, FALSE);
+    (void)hrSel; // non-fatal
+  }
+
+  // Reset internal timing state so next start will rebase timestamps.
+  m_bFirstSample = TRUE;
+  m_llBaseTime = 0;
 
   LeaveCriticalSection(&m_critsec);
 

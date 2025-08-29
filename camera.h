@@ -12,7 +12,6 @@ class Camera : public Napi::ObjectWrap<Camera> {
 
   CCapture* device;
   IMFActivate* claimedActivate = nullptr;
-  std::wstring claimedTempFile;
   // Camera delegates supported-format and format-setting operations to CCapture
 
   Napi::Value EnumerateDevicesAsync(const Napi::CallbackInfo& info);

@@ -143,19 +143,11 @@ Napi::Value Camera::GetCameraInfoAsync(const Napi::CallbackInfo& info) {
           UINT32 h = std::get<2>(types[i]);
           double fr = std::get<3>(types[i]);
 
-          // GUID string for round-tripping
-          OLECHAR wsz[64];
-          StringFromGUID2(g, wsz, ARRAYSIZE(wsz));
-          int len = WideCharToMultiByte(CP_UTF8, 0, wsz, -1, NULL, 0, NULL, NULL);
-          std::string guidStr;
-          if (len > 0) {
-            guidStr.assign(len, '\0');
-            WideCharToMultiByte(CP_UTF8, 0, wsz, -1, &guidStr[0], len, NULL, NULL);
-            if (!guidStr.empty() && guidStr.back() == '\0') guidStr.pop_back();
-          }
+          // Use friendly short name for subtype if available
+          std::string subtypeName = SubtypeGuidToName(g);
 
           Napi::Object entry = Napi::Object::New(env);
-          entry.Set("subtype", Napi::String::New(env, guidStr));
+          entry.Set("subtype", Napi::String::New(env, subtypeName));
           entry.Set("width", Napi::Number::New(env, w));
           entry.Set("height", Napi::Number::New(env, h));
           // use only `frameRate` for frame rate information
@@ -197,11 +189,7 @@ Camera::~Camera() {
     device->Release();
     device = nullptr;
   }
-  if (!claimedTempFile.empty()) {
-    // Delete the temporary sink file created when claiming the device
-    DeleteFileW(claimedTempFile.c_str());
-    claimedTempFile.clear();
-  }
+
 }
 
 Napi::Value Camera::EnumerateDevicesAsync(const Napi::CallbackInfo& info) {
@@ -459,22 +447,14 @@ Napi::Value Camera::GetSupportedFormatsAsync(const Napi::CallbackInfo& info) {
         for (uint32_t i = 0; i < types.size(); ++i) {
           Napi::Object obj = Napi::Object::New(env);
           GUID g = std::get<0>(types[i]);
-          // GUID string for round-tripping
-          OLECHAR wsz[64];
-          StringFromGUID2(g, wsz, ARRAYSIZE(wsz));
-          int len = WideCharToMultiByte(CP_UTF8, 0, wsz, -1, NULL, 0, NULL, NULL);
-          std::string guidStr;
-          if (len > 0) {
-            guidStr.assign(len, '\0');
-            WideCharToMultiByte(CP_UTF8, 0, wsz, -1, &guidStr[0], len, NULL, NULL);
-            if (!guidStr.empty() && guidStr.back() == '\0') guidStr.pop_back();
-          }
+          // Use short friendly name when possible (e.g., "MJPEG", "NV12")
+          std::string subtypeName = SubtypeGuidToName(g);
 
           UINT32 w = std::get<1>(types[i]);
           UINT32 h = std::get<2>(types[i]);
           double fr = std::get<3>(types[i]);
 
-          obj.Set("subtype", Napi::String::New(env, guidStr));
+          obj.Set("subtype", Napi::String::New(env, subtypeName));
           obj.Set("width", Napi::Number::New(env, w));
           obj.Set("height", Napi::Number::New(env, h));
           obj.Set("frameRate", Napi::Number::New(env, fr));

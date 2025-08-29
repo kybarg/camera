@@ -59,10 +59,10 @@ async function takeCameraSnapshot(): Promise<void> {
       }
 
       // Print grouped formats by subtype for readability
-      if (infoFormats.length > 0) {
+      if (formats.length > 0) {
         console.log("     formats (grouped by subtype):");
         const bySubtype: { [s: string]: CameraFormat[] } = {};
-        for (const f of infoFormats) {
+        for (const f of formats) {
           const s = f.subtype || "<unknown>";
           if (!bySubtype[s]) bySubtype[s] = [];
           bySubtype[s].push(f);

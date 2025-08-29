@@ -65,7 +65,7 @@ class Camera extends EventEmitter {
       this._nativeCamera
     );
 
-    // this._isCapturing = false;
+  this._isCapturing = false;
 
     // Frame event emitter used by native code
     this._frameEventEmitter = (frameData) => {

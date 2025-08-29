@@ -17,7 +17,10 @@ export interface DeviceInfo {
  */
 export interface CameraFormat {
   /** Native subtype GUID string (round-trippable) */
+  /** Friendly short subtype name (e.g., 'MJPEG', 'NV12', 'YUY2', 'RGB32') */
   subtype: string;
+  /** Native subtype GUID string (round-trippable); present in getSupportedFormats entries */
+  guid?: string;
   /** Width of the camera format in pixels */
   width: number;
   /** Height of the camera format in pixels */
@@ -84,7 +87,16 @@ export interface CameraInfo {
  * Camera events interface
  */
 export interface CameraEvents {
-  /** Emitted when a new frame is captured. frameData is a Buffer containing RGBA pixel data */
+  /** Emitted when a new frame/sample is captured.
+   *
+   * The payload is a Node.js Buffer containing the raw contiguous sample bytes
+   * returned by the OS/driver for the negotiated media subtype. For example:
+   * - MJPEG/MJPEG frames: JPEG bitstream bytes
+   * - NV12/YUY2: raw YUV planar/interleaved bytes
+   * - RGB32/RGB24: raw pixel bytes
+   *
+   * The exact layout depends on the chosen CameraFormat (check the `subtype`/`guid`).
+   */
   frame: (frameData: Buffer) => void;
 }
 

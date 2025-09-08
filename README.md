@@ -1,281 +1,140 @@
 # Camera Device Management Library
 
-Node.js C++ addon for Windows camera capture using Media Foundation API with persistent device management and full TypeScript support.
+[![npm version](https://img.shields.io/npm/v/@kybarg/camera.svg)](https://www.npmjs.com/package/@kybarg/camera)
+[![npm downloads](https://img.shields.io/npm/dm/@kybarg/camera.svg)](https://www.npmjs.com/package/@kybarg/camera)
+[![license](https://img.shields.io/github/license/kybarg/camera.svg)](LICENSE)
+[![github stars](https://img.shields.io/github/stars/kybarg/camera?style=social)](https://github.com/kybarg/camera)
 
-## Features
+Node.js native addon for Windows camera capture using the Media Foundation API.
 
-- **Ultra-fast pixel processing** with 15-20x speedup for BGRA to RGBA conversion
-- **Persistent device identification** using Windows symbolic links
-- **Promise-based async API** with comprehensive error handling and typed responses
-- **Format management** with automatic best-match selection
-- **JPG image saving** with Sharp library integration
-- **Session-independent device claiming** that survives reboots
-- **Full TypeScript support** with comprehensive type definitions
-- **Event-driven frame capture** using EventEmitter pattern
+## Highlights
+
+- Format selection: choose native subtypes such as `mjpeg`/`MJPEG`, `nv12`, `yuy2`, or supply a GUID string to target a specific media subtype.
+- `setFormat(format: CameraFormat)` is a single API: `format.subtype` (string or GUID), `width`, `height`, and a required `frameRate`.
+- Automatic recovery/resume support for device sleep or transient device loss (see `recoverDevice()` / `recoverDeviceAsync()` and `examples/recovery_test.js`).
+- Promise-based async API and TypeScript typings included.
 
 ## Installation
 
-```bash
-npm install @kybarg/camera
-```
-
-For TypeScript development:
-```bash
-npm install --save-dev typescript @types/node ts-node
-```
-
-## Quick Start
-
-### Installation and Build
-
-```bash
+```powershell
 npm install
 npm run build
 ```
 
-### Running Examples
-
-```bash
-# Basic camera capture (JavaScript)
-npm run example
-
-# TypeScript camera capture example
-npm run example-ts
-
-# Format management and device status demos are available in the examples directory.
-```
-
-### Type Checking
-
-```bash
-npm run type-check
-```
+Notes: building the native addon requires Visual Studio Build Tools and Python (for `node-gyp`).
 
 ## Quick Examples
 
-### JavaScript Usage
+### JavaScript (minimal)
 
 ```javascript
 const Camera = require('@kybarg/camera');
 
-async function captureCamera() {
-  const camera = new Camera();
+async function main() {
+  const cam = new Camera();
+  const devices = await cam.enumerateDevices();
+  if (!devices.length) return console.log('No cameras');
 
-  try {
-    // Enumerate available devices
-    const devices = await camera.enumerateDevices();
-    console.log('Available devices:', devices);
+  await cam.claimDevice(devices[0].symbolicLink);
 
-    if (devices.length > 0) {
-      // Claim device using persistent symbolic link
-      const claimResult = await camera.claimDevice(devices[0].symbolicLink);
-      console.log('Device claimed:', claimResult.message);
+  // Choose a supported format (eg. MJPEG or NV12) from getSupportedFormats()
+  const formats = await cam.getSupportedFormats();
+  // formats contain { subtype, width, height, frameRate, ... }
+  const fmt = formats.find(f => {
+    const s = (f.subtype || '').toLowerCase();
+    return s.includes('mjpeg') || s.includes('mjpg');
+  }) || formats[0];
 
-      // Set up event listener for frames
-      camera.on('frame', (frameBuffer) => {
-        console.log(`Captured frame: ${frameBuffer.length} bytes`);
-      });
+  await cam.setFormat({ subtype: fmt.subtype, width: fmt.width, height: fmt.height, frameRate: fmt.frameRate });
 
-      // Start capture
-      const startResult = await camera.startCapture();
-      console.log('Capture started:', startResult.message);
+  // Listen for raw sample buffers (Uint8Array-backed Buffer)
+  cam.on('frame', (buf) => {
+    console.log('frame bytes:', buf.length);
+    // buf is the raw contiguous sample bytes from the camera (MJPEG packet or NV12 plane data)
+  });
 
-      // Stop after 5 seconds
-      setTimeout(async () => {
-        await camera.stopCapture();
-        await camera.releaseDevice();
-      }, 5000);
-    }
-  } catch (error) {
-    console.error('Error:', error);
-  }
+  await cam.startCapture();
+
+  // stop later
+  setTimeout(async () => {
+    await cam.stopCapture();
+    await cam.releaseDevice();
+  }, 5000);
 }
 
-captureCamera().catch(console.error);
+main().catch(console.error);
 ```
 
-### TypeScript Usage
+Important: the frames you receive are the native sample payloads. For compressed formats (MJPEG) the buffer contains JPEG frames. For planar formats (NV12) you'll get the raw plane data. The library intentionally avoids converting pixel formats automatically so you can control decoding/processing downstream.
 
-```typescript
-import Camera = require('@kybarg/camera');
-import type { DeviceInfo, CameraFormat, OperationResult } from '@kybarg/camera';
+## API Overview
 
-async function captureCamera(): Promise<void> {
-  const camera = new Camera();
+All async methods return Promises. See `index.d.ts` for full TypeScript types.
 
-  try {
-    // Enumerate available devices with type safety
-    const devices: DeviceInfo[] = await camera.enumerateDevices();
-    console.log('Available devices:', devices);
+Camera methods of interest:
 
-    if (devices.length > 0) {
-      // Claim device with typed response
-      const claimResult: OperationResult = await camera.claimDevice(devices[0].symbolicLink);
-      console.log('Device claimed:', claimResult.message);
+- `enumerateDevices(): Promise<DeviceInfo[]>` — list attached cameras with persistent `symbolicLink` identifiers.
+- `claimDevice(symbolicLink): Promise<OperationResult>` — claim exclusive use of a device (survives process restarts if claimed).
+- `releaseDevice(): Promise<OperationResult>` — release claimed device.
+- `getSupportedFormats(): Promise<CameraFormat[]>` — returns formats with fields `{ subtype, width, height, frameRate, guid? }`.
+- `setFormat(format: CameraFormat): Promise<SetFormatResult>` — set format using `subtype` (string like `nv12` or a GUID string), required `width`, `height`, and required `frameRate`.
+- `startCapture(): Promise<OperationResult>` — begin streaming; frames are emitted as `'frame'` events.
+- `stopCapture(): Promise<OperationResult>` — stop streaming.
+- `recoverDevice(): Promise<OperationResult>` — attempt to recover a previously-claimed device after sleep or transient loss; the native side will try small toggles and a recreate/restart before failing.
+- `isCapturing(): boolean` — synchronous check for capture state.
 
-      // Get supported formats with typing
-      const formats: CameraFormat[] = await camera.getSupportedFormats();
-      console.log('Supported formats:', formats);
+Events:
 
-      // Type-safe event handling
-      camera.on('frame', (frameBuffer: Buffer) => {
-        console.log(`Captured frame: ${frameBuffer.length} bytes`);
-      });
+- `'frame'` — emitted with a single argument: `Buffer` containing the raw sample bytes for that sample.
 
-      // Start capture with typed result
-      const startResult: OperationResult = await camera.startCapture();
-      console.log('Capture started:', startResult.message);
+Example TypeScript types (see `index.d.ts` in the repo):
 
-      // Stop after 5 seconds
-      setTimeout(async () => {
-        await camera.stopCapture();
-        await camera.releaseDevice();
-      }, 5000);
-    }
-  } catch (error) {
-    console.error('Error:', error);
-  }
-}
-
-captureCamera().catch(console.error);
-```
-
-## Examples
-
-Run any example from the `examples/` directory:
-
-```bash
-# Basic camera capture (JavaScript)
-npm run example
-# or: node examples/example.js
-
-# TypeScript camera capture with full typing
-npm run example-ts
-# or: npx ts-node examples/typescript-example.ts
-
-# See additional demos in the examples/ directory.
-```
-
-## Tests
-
-This project currently has no automated tests.
-
-## API Reference
-
-### Camera Class
-
-The Camera class extends EventEmitter and provides async methods for camera operations.
-
-#### `enumerateDevices(): Promise<DeviceInfo[]>`
-Returns list of available camera devices with persistent symbolic links.
-
-**Returns:**
-```typescript
-interface DeviceInfo {
-  friendlyName: string;    // Human-readable device name
-  symbolicLink: string;    // Persistent device identifier
-}
-```
-
-#### `claimDevice(symbolicLink: string): Promise<ClaimDeviceResult>`
-Claims exclusive access to camera device using symbolic link.
-
-**Returns:**
-```typescript
-interface ClaimDeviceResult {
-  success: boolean;        // Operation success status
-  message: string;         // Descriptive message
-  symbolicLink: string;    // Claimed device symbolic link
-}
-```
-
-#### `releaseDevice(): Promise<OperationResult>`
-Releases the currently claimed camera device.
-
-#### `getSupportedFormats(): Promise<CameraFormat[]>`
-Returns supported camera formats for the claimed device.
-
-**Returns:**
-```typescript
+```ts
 interface CameraFormat {
-  width: number;           // Format width in pixels
-  height: number;          // Format height in pixels
-  frameRate: number;       // Frame rate in fps
+  subtype: string; // human-friendly name (eg. 'nv12', 'mjpe g', 'yuy2') or GUID string
+  width: number;
+  height: number;
+  frameRate: number; // required
 }
 ```
 
-#### `setFormat(format: CameraFormat): Promise<SetFormatResult>`
-Sets the camera format using a CameraFormat object returned from `getSupportedFormats()` or a user-constructed object. The CameraFormat now includes a `subtype` field (string) identifying the native pixel format (for example: "nv12", "rgb24", "rgb32", or a GUID string).
+## Recovery and Resume
 
-**Parameters:**
-- `format: CameraFormat` — an object with `subtype`, `width`, `height`, and `frameRate` fields.
+The addon implements recovery helpers to improve robustness after system sleep or temporary device loss. `recoverDevice()` / `recoverDeviceAsync()` will attempt:
 
-**Returns:**
-```typescript
-interface SetFormatResult {
-  success: boolean;        // Operation success status
-  message: string;         // Descriptive message
-  actualWidth: number;     // Actual width that was set
-  actualHeight: number;    // Actual height that was set
-}
+1. a stream toggle (end session, short wait, restart) with a longer wait for the first sample;
+2. if that fails, a full recreate of the capture object and a restart attempt;
+3. it reports operation-level HRESULTs and diagnostic logs to stderr when enabled in the native build.
+
+See `examples/recovery_test.js` for an automated test harness that triggers recovery on inactivity and validates whether frames resume.
+
+## Examples and Tests
+
+Run the examples:
+
+```powershell
+npm run example
+# or
+node examples/example.js
+
+# recovery test (non-interactive)
+node examples/recovery_test.js
 ```
 
-#### `getDimensions(): CameraDimensions`
-Gets the current camera dimensions (synchronous).
+## Building
 
-**Returns:**
-```typescript
-interface CameraDimensions {
-  width: number;           // Current width in pixels
-  height: number;          // Current height in pixels
-}
+```powershell
+npm install
+npm run build
 ```
 
-#### `startCapture(): Promise<OperationResult>`
-Starts camera capture. Frames are emitted as 'frame' events.
+Requirements: Windows 10/11, Visual Studio Build Tools (or VS), Python 3.x for node-gyp.
 
-#### `stopCapture(): Promise<OperationResult>`
-Stops camera capture.
+## Notes
 
-#### `isCapturing(): boolean`
-Returns true if camera is currently capturing frames.
-
-### Events
-
-#### `'frame'` Event
-Emitted when a new frame is captured.
-
-```typescript
-camera.on('frame', (frameData: Buffer) => {
-  // frameData contains RGBA pixel data
-  console.log(`Frame size: ${frameData.length} bytes`);
-});
-```
-
-### TypeScript Support
-
-For TypeScript usage, see `examples/typescript-example.ts`.
-
-## Available Scripts
-
-```bash
-npm run build         # Build the native addon
-npm run example       # Run JavaScript example
-npm run example-ts    # Run TypeScript example
-npm run type-check    # Check TypeScript types
-```
-
-## Requirements
-
-- **Windows 10/11** (Media Foundation API)
-- **Node.js 16+**
-- **Visual Studio Build Tools** or **Visual Studio 2019/2022**
-- **Python 3.x** (for node-gyp)
-
-## Migration
-
-If you used older APIs, check the examples for the current async methods.
+- The library delivers raw sample buffers. If you need decoded RGBA frames, decode MJPEG or convert NV12 -> RGBA using your preferred native or JS library (for example `sharp` for JPEG decoding or a native fast converter for NV12).
+- The `setFormat` API now accepts subtype names and GUID strings; for best results use a format object returned by `getSupportedFormats()`.
 
 ## License
 
-See [LICENSE](LICENSE) file for details.
+See [LICENSE](LICENSE).

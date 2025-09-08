@@ -1,7 +1,7 @@
 {
   "name": "@kybarg/camera",
   "version": "0.0.14",
-  "description": "Node.js Addons to work with web cameras",
+  "description": "Native Node.js addon for high-performance Windows camera capture using Media Foundation. Select native formats (MJPEG/NV12/YUY2), receive raw sample buffers, and recover from sleep/device loss.",
   "main": "addon.js",
   "types": "index.d.ts",
   "private": false,
@@ -10,14 +10,19 @@
     "webcam",
     "video",
     "capture",
-    "native",
-    "addon",
     "media-foundation",
-    "windows"
+    "native-addon",
+    "node-addon",
+    "windows",
+    "nv12",
+    "mjpeg"
   ],
   "files": [
     "addon.js",
     "index.d.ts",
+    "README.md",
+    "LICENSE",
+    "examples/",
     "build/Release/addon.node",
     "binding.gyp",
     "*.cc",
@@ -25,20 +30,36 @@
   ],
   "scripts": {
     "build": "node-gyp rebuild",
+    "prepare": "npm run build",
     "example": "node examples/example.js",
     "example-ts": "npx ts-node examples/example.ts",
     "type-check": "tsc --noEmit",
-    "prepublishOnly": "npm run build && npm run type-check"
+    "prepublishOnly": "npm run type-check"
   },
   "dependencies": {
     "bindings": "^1.5.0",
-    "node-addon-api": "^8.5.0",
-    "node-gyp": "^11.4.2"
+    "node-addon-api": "^8.5.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.9",
     "sharp": "^0.34.3",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "node-gyp": "^11.4.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kybarg/camera.git"
+  },
+  "homepage": "https://github.com/kybarg/camera#readme",
+  "bugs": {
+    "url": "https://github.com/kybarg/camera/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=16"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

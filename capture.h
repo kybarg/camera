@@ -18,6 +18,7 @@
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
+#include <wincodec.h>
 #include <string>
 #include <functional>
 #include <utility>
@@ -103,6 +104,11 @@ class CCapture : public IMFSourceReaderCallback {
   HRESULT GetCurrentDimensions(UINT32* pWidth, UINT32* pHeight, double* pFrameRate);
   // Provide a callback to receive raw frame buffers (moved into the callback)
   void SetFrameCallback(std::function<void(std::vector<uint8_t>&&)> cb) { m_frameCallback = std::move(cb); }
+  // Set output format for conversion (GUID_NULL = no conversion, pass-through)
+  // Supported: MFVideoFormat_RGB32, MFVideoFormat_RGB24, MFVideoFormat_NV12, MFVideoFormat_YUY2, etc.
+  HRESULT SetOutputFormat(const GUID& outputSubtype);
+  // Clear output format (disable conversion, return raw frames)
+  void ClearOutputFormat();
   // Return last enumerated supported formats (stored internally)
   // Deprecated: removed internal cached supported formats
   // (EnumerateFormatsFromActivate removed; CCapture now supports InitFromActivate and GetSupportedFormats)
@@ -142,6 +148,13 @@ class CCapture : public IMFSourceReaderCallback {
   // (removed) cache of last enumerated formats
   // Frame callback used when delivering frames to the embedding (JS)
   std::function<void(std::vector<uint8_t>&&)> m_frameCallback;
-  // Reusable RGBA buffer for frame conversion
+  // Reusable buffer for frame conversion
   std::vector<uint8_t> m_rgbaBuffer;
+  // Output format conversion
+  GUID m_outputFormat;           // Target output subtype (GUID_NULL = no conversion)
+  IWICImagingFactory* m_pWicFactory;  // WIC factory for JPEG encoding
+  // Internal: encode frame to JPEG using WIC
+  HRESULT EncodeToJpeg(const uint8_t* rgbData, UINT32 width, UINT32 height, bool isBGRA, std::vector<uint8_t>& outBuffer);
+  // Internal: convert sample to output format
+  HRESULT ConvertFrame(IMFSample* pSample, const GUID& inputSubtype, UINT32 width, UINT32 height, std::vector<uint8_t>& outBuffer);
 };

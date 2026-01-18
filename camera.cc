@@ -54,7 +54,7 @@ static std::string GuidToString(const GUID& g) {
 }
 
 Napi::Object Camera::Init(Napi::Env env, Napi::Object exports) {
-  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("getCameraInfoAsync", &Camera::GetCameraInfoAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("setFormatAsync", &Camera::SetFormatAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync)});
+  Napi::Function func = DefineClass(env, "Camera", {InstanceMethod("claimDeviceAsync", &Camera::ClaimDeviceAsync), InstanceMethod("enumerateDevicesAsync", &Camera::EnumerateDevicesAsync), InstanceMethod("getDimensions", &Camera::GetDimensions), InstanceMethod("getSupportedFormatsAsync", &Camera::GetSupportedFormatsAsync), InstanceMethod("getCameraInfoAsync", &Camera::GetCameraInfoAsync), InstanceMethod("releaseDeviceAsync", &Camera::ReleaseDeviceAsync), InstanceMethod("setFormatAsync", &Camera::SetFormatAsync), InstanceMethod("setOutputFormatAsync", &Camera::SetOutputFormatAsync), InstanceMethod("startCaptureAsync", &Camera::StartCaptureAsync), InstanceMethod("stopCaptureAsync", &Camera::StopCaptureAsync)});
 
   Napi::FunctionReference* constructor = new Napi::FunctionReference();
   *constructor = Napi::Persistent(func);
@@ -654,6 +654,74 @@ Napi::Value Camera::SetFormatAsync(const Napi::CallbackInfo& info) {
       tsfnPromise.BlockingCall(callback);
     }
 
+    tsfnPromise.Release();
+  }).detach();
+
+  return deferred.Promise();
+}
+
+Napi::Value Camera::SetOutputFormatAsync(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  if (!this->device) {
+    Napi::TypeError::New(env, "Device not initialized").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  auto deferred = Napi::Promise::Deferred::New(env);
+
+  // Accept null/undefined to clear output format, or a string like "RGB32", "NV12", etc.
+  GUID outputGuid = GUID_NULL;
+  bool clearFormat = false;
+
+  if (info.Length() == 0 || info[0].IsNull() || info[0].IsUndefined()) {
+    clearFormat = true;
+  } else if (info[0].IsString()) {
+    std::string formatStr = info[0].As<Napi::String>().Utf8Value();
+    if (!ParseSubtypeString(formatStr, outputGuid)) {
+      Napi::TypeError::New(env, "Unknown output format. Use 'RGB32', 'RGB24', 'NV12', 'YUY2', or a GUID string.").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+  } else {
+    Napi::TypeError::New(env, "Expected output format string or null/undefined to clear").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  auto tsfnPromise = Napi::ThreadSafeFunction::New(env, Napi::Function(), "SetOutputFormatAsync", 0, 1);
+
+  std::thread([this, deferred = std::move(deferred), tsfnPromise = std::move(tsfnPromise), outputGuid, clearFormat]() mutable {
+    try {
+      HRESULT hr = S_OK;
+
+      if (clearFormat) {
+        this->device->ClearOutputFormat();
+      } else {
+        hr = this->device->SetOutputFormat(outputGuid);
+      }
+
+      if (FAILED(hr)) {
+        auto callback = [deferred = std::move(deferred), hr](Napi::Env env, Napi::Function) mutable {
+          std::string msg = HResultToString(hr);
+          deferred.Reject(Napi::Error::New(env, msg).Value());
+        };
+        tsfnPromise.BlockingCall(callback);
+        tsfnPromise.Release();
+        return;
+      }
+
+      auto callback = [deferred = std::move(deferred), clearFormat](Napi::Env env, Napi::Function) mutable {
+        Napi::Object result = Napi::Object::New(env);
+        result.Set("success", Napi::Boolean::New(env, true));
+        result.Set("message", Napi::String::New(env, clearFormat ? "Output format cleared" : "Output format set"));
+        deferred.Resolve(result);
+      };
+      tsfnPromise.BlockingCall(callback);
+    } catch (const std::exception& e) {
+      auto callback = [deferred = std::move(deferred), message = std::string(e.what())](Napi::Env env, Napi::Function) mutable {
+        deferred.Reject(Napi::Error::New(env, message).Value());
+      };
+      tsfnPromise.BlockingCall(callback);
+    }
     tsfnPromise.Release();
   }).detach();
 

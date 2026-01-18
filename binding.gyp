@@ -24,7 +24,8 @@
         "-lole32",
         "-luuid",
         "-lstrmiids",
-        "-lshlwapi"
+        "-lshlwapi",
+        "-lwindowscodecs"
       ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")"

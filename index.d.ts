@@ -1,6 +1,6 @@
 /// <reference types="node" />
 
-import { EventEmitter } from 'events';
+import { EventEmitter } from "events";
 
 /**
  * Device information returned by camera enumeration
@@ -148,20 +148,40 @@ export declare class Camera extends EventEmitter {
    * The camera will select the closest matching format if exact match is not available
    * @param width - Desired width in pixels
    * @param height - Desired height in pixels
-  * @param frameRate - Desired frame rate (frameRate)
+   * @param frameRate - Desired frame rate (frameRate)
    * @returns Promise that resolves to the actual format that was set
    * @throws Error if format cannot be set
    */
   /**
-  * Set desired format using an explicit native subtype identifier (string) plus resolution and frameRate.
+   * Set desired format using an explicit native subtype identifier (string) plus resolution and frameRate.
    * The subtype may be a common name like 'NV12', 'RGB24', 'RGB32', 'MJPG' or a GUID string.
    */
   /**
-  * Set desired format using an explicit native subtype identifier (string) plus resolution and frameRate.
+   * Set desired format using an explicit native subtype identifier (string) plus resolution and frameRate.
    * The subtype may be a common name like 'NV12', 'RGB24', 'RGB32', 'MJPG' or a GUID string.
    */
   // Accept a single CameraFormat object: { subtype, width, height, frameRate }
   setFormat(format: CameraFormat): Promise<SetFormatResult>;
+
+  /**
+   * Set the output format for frame conversion using Windows Media Foundation.
+   * When set, captured frames will be converted from the native camera format
+   * to the specified output format before being delivered to the 'frame' event.
+   *
+   * Supported output formats: 'RGB32', 'RGB24', 'NV12', 'YUY2', 'UYVY', 'IYUV', or a GUID string.
+   *
+   * @param format - Output format string (e.g., 'RGB32', 'NV12') or null/undefined to disable conversion
+   * @returns Promise that resolves when the output format is set
+   * @throws Error if the format is not supported or conversion cannot be configured
+   *
+   * @example
+   * // Enable conversion to RGB32 (BGRA)
+   * await camera.setOutputFormat('RGB32');
+   *
+   * // Disable conversion (return raw native frames)
+   * await camera.setOutputFormat(null);
+   */
+  setOutputFormat(format?: string | null): Promise<OperationResult>;
 
   /**
    * Get the current camera dimensions
@@ -198,14 +218,23 @@ export declare class Camera extends EventEmitter {
   once<K extends keyof CameraEvents>(event: K, listener: CameraEvents[K]): this;
   once(event: string | symbol, listener: (...args: any[]) => void): this;
 
-  emit<K extends keyof CameraEvents>(event: K, ...args: Parameters<CameraEvents[K]>): boolean;
+  emit<K extends keyof CameraEvents>(
+    event: K,
+    ...args: Parameters<CameraEvents[K]>
+  ): boolean;
   emit(event: string | symbol, ...args: any[]): boolean;
 
   off<K extends keyof CameraEvents>(event: K, listener: CameraEvents[K]): this;
   off(event: string | symbol, listener: (...args: any[]) => void): this;
 
-  removeListener<K extends keyof CameraEvents>(event: K, listener: CameraEvents[K]): this;
-  removeListener(event: string | symbol, listener: (...args: any[]) => void): this;
+  removeListener<K extends keyof CameraEvents>(
+    event: K,
+    listener: CameraEvents[K],
+  ): this;
+  removeListener(
+    event: string | symbol,
+    listener: (...args: any[]) => void,
+  ): this;
 }
 
 // For CommonJS usage

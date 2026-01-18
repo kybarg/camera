@@ -10,18 +10,18 @@ class Camera extends EventEmitter {
 
     // Bind async methods from native camera
     this.enumerateDevices = this._nativeCamera.enumerateDevicesAsync.bind(
-      this._nativeCamera
+      this._nativeCamera,
     );
     this.claimDevice = this._nativeCamera.claimDeviceAsync.bind(
-      this._nativeCamera
+      this._nativeCamera,
     );
     this.releaseDevice = this._nativeCamera.releaseDeviceAsync.bind(
-      this._nativeCamera
+      this._nativeCamera,
     );
 
     // Bind other native methods
     this.getSupportedFormats = this._nativeCamera.getSupportedFormatsAsync.bind(
-      this._nativeCamera
+      this._nativeCamera,
     );
     // Provide a normalized getCameraInfo that returns a single `formats` object
     this.getCameraInfo = async () => {
@@ -44,10 +44,15 @@ class Camera extends EventEmitter {
         if (Array.isArray(flat)) {
           const formats = {};
           for (const r of flat) {
-            const subtype = r.subtype || '<unknown>';
+            const subtype = r.subtype || "<unknown>";
             const key = subtype;
-            if (!formats[key]) formats[key] = { subtype: subtype, resolutions: [] };
-            formats[key].resolutions.push({ width: r.width, height: r.height, frameRate: r.frameRate });
+            if (!formats[key])
+              formats[key] = { subtype: subtype, resolutions: [] };
+            formats[key].resolutions.push({
+              width: r.width,
+              height: r.height,
+              frameRate: r.frameRate,
+            });
           }
           out.formats = formats;
         }
@@ -58,14 +63,16 @@ class Camera extends EventEmitter {
       return out;
     };
     // Expose native subtype-aware format setter
-    this.setFormat = this._nativeCamera.setFormatAsync.bind(
-      this._nativeCamera
+    this.setFormat = this._nativeCamera.setFormatAsync.bind(this._nativeCamera);
+    // Output format conversion: set target format for MF conversion, or null to disable
+    this.setOutputFormat = this._nativeCamera.setOutputFormatAsync.bind(
+      this._nativeCamera,
     );
     this.getDimensions = this._nativeCamera.getDimensions.bind(
-      this._nativeCamera
+      this._nativeCamera,
     );
 
-  this._isCapturing = false;
+    this._isCapturing = false;
 
     // Frame event emitter used by native code
     this._frameEventEmitter = (frameData) => {
@@ -85,7 +92,7 @@ class Camera extends EventEmitter {
     try {
       // Pass the frame event emitter to the native method
       const result = await this._nativeCamera.startCaptureAsync(
-        this._frameEventEmitter
+        this._frameEventEmitter,
       );
       return result;
     } catch (error) {

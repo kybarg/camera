@@ -199,7 +199,9 @@ CCapture::CCapture(HWND hwnd) : m_pReader(NULL),
                                 m_nRefCount(1),
                                 m_bFirstSample(FALSE),
                                 m_llBaseTime(0),
-                                m_pwszSymbolicLink(NULL) {
+                                m_pwszSymbolicLink(NULL),
+                                m_outputFormat(GUID_NULL),
+                                m_pWicFactory(NULL) {
   InitializeCriticalSection(&m_critsec);
 }
 
@@ -209,6 +211,7 @@ CCapture::CCapture(HWND hwnd) : m_pReader(NULL),
 
 CCapture::~CCapture() {
   assert(m_pReader == NULL);
+  SafeRelease(&m_pWicFactory);
   DeleteCriticalSection(&m_critsec);
 }
 
@@ -291,36 +294,40 @@ HRESULT CCapture::OnReadSample(
       goto done;
     }
     if (m_frameCallback) {
-      // Deliver sample to the registered frame callback with format conversion
+      // Get current input format
       IMFMediaType* pType = NULL;
-      GUID subtype = {0};
+      GUID subtype = GUID_NULL;
       UINT32 width = 0, height = 0;
-
       if (SUCCEEDED(m_pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType)) && pType) {
         pType->GetGUID(MF_MT_SUBTYPE, &subtype);
         MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
+        SafeRelease(&pType);
       }
 
-      IMFMediaBuffer* pBuffer = NULL;
-      HRESULT hrBuf = pSample->ConvertToContiguousBuffer(&pBuffer);
-      if (SUCCEEDED(hrBuf) && pBuffer) {
-        BYTE* pData = NULL;
-        DWORD maxLen = 0, curLen = 0;
-        hrBuf = pBuffer->Lock(&pData, &maxLen, &curLen);
-        if (SUCCEEDED(hrBuf) && pData && curLen > 0) {
-          try {
-            // Deliver the raw contiguous buffer bytes as-is to the frame callback.
-            std::vector<uint8_t> out;
-            out.assign(pData, pData + curLen);
-            m_frameCallback(std::move(out));
-          } catch (...) {
-            // ignore delivery errors
-          }
+      // Check if conversion needed
+      bool needsConversion = !IsEqualGUID(m_outputFormat, GUID_NULL) && !IsEqualGUID(subtype, m_outputFormat);
+
+      if (needsConversion && width > 0 && height > 0) {
+        std::vector<uint8_t> converted;
+        if (SUCCEEDED(ConvertFrame(pSample, subtype, width, height, converted)) && !converted.empty()) {
+          try { m_frameCallback(std::move(converted)); } catch (...) {}
         }
-        pBuffer->Unlock();
+      } else {
+        // No conversion; deliver raw buffer
+        IMFMediaBuffer* pBuffer = NULL;
+        if (SUCCEEDED(pSample->ConvertToContiguousBuffer(&pBuffer)) && pBuffer) {
+          BYTE* pData = NULL;
+          DWORD curLen = 0;
+          if (SUCCEEDED(pBuffer->Lock(&pData, NULL, &curLen)) && pData && curLen > 0) {
+            try {
+              std::vector<uint8_t> out(pData, pData + curLen);
+              m_frameCallback(std::move(out));
+            } catch (...) {}
+            pBuffer->Unlock();
+          }
+          SafeRelease(&pBuffer);
+        }
       }
-      SafeRelease(&pBuffer);
-      SafeRelease(&pType);
     }
   }
 
@@ -805,7 +812,6 @@ HRESULT CCapture::ReleaseDevice() {
     m_pReader->Release();
     m_pReader = nullptr;
   }
-  // No writer member present
   if (m_pwszSymbolicLink) {
     CoTaskMemFree(m_pwszSymbolicLink);
     m_pwszSymbolicLink = nullptr;
@@ -814,11 +820,214 @@ HRESULT CCapture::ReleaseDevice() {
   m_frameCallback = nullptr;
   m_bFirstSample = TRUE;
   m_llBaseTime = 0;
+  m_outputFormat = GUID_NULL;
   return S_OK;
 }
 
 // static
 // EnumerateFormatsFromActivate removed; CCapture now exposes InitFromActivate + GetSupportedFormats
+
+//-------------------------------------------------------------------
+// SetOutputFormat
+//-------------------------------------------------------------------
+
+HRESULT CCapture::SetOutputFormat(const GUID& outputSubtype) {
+  EnterCriticalSection(&m_critsec);
+  m_outputFormat = outputSubtype;
+  LeaveCriticalSection(&m_critsec);
+  return S_OK;
+}
+
+//-------------------------------------------------------------------
+// ClearOutputFormat
+//-------------------------------------------------------------------
+
+void CCapture::ClearOutputFormat() {
+  EnterCriticalSection(&m_critsec);
+  m_outputFormat = GUID_NULL;
+  LeaveCriticalSection(&m_critsec);
+}
+
+//-------------------------------------------------------------------
+// EncodeToJpeg - Encode RGB/BGRA data to JPEG using WIC
+//-------------------------------------------------------------------
+
+HRESULT CCapture::EncodeToJpeg(const uint8_t* rgbData, UINT32 width, UINT32 height, bool isBGRA, std::vector<uint8_t>& outBuffer) {
+  HRESULT hr = S_OK;
+
+  // Create WIC factory if needed
+  if (!m_pWicFactory) {
+    hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_pWicFactory));
+    if (FAILED(hr)) return hr;
+  }
+
+  IWICStream* pStream = NULL;
+  IWICBitmapEncoder* pEncoder = NULL;
+  IWICBitmapFrameEncode* pFrame = NULL;
+  IPropertyBag2* pPropertyBag = NULL;
+
+  // Create memory stream
+  hr = m_pWicFactory->CreateStream(&pStream);
+  if (FAILED(hr)) goto cleanup;
+
+  hr = pStream->InitializeFromMemory(NULL, 0);
+  if (FAILED(hr)) {
+    // Use IStream instead
+    IStream* pMemStream = NULL;
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &pMemStream);
+    if (FAILED(hr)) goto cleanup;
+    hr = pStream->InitializeFromIStream(pMemStream);
+    pMemStream->Release();
+    if (FAILED(hr)) goto cleanup;
+  }
+
+  // Create JPEG encoder
+  hr = m_pWicFactory->CreateEncoder(GUID_ContainerFormatJpeg, NULL, &pEncoder);
+  if (FAILED(hr)) goto cleanup;
+
+  hr = pEncoder->Initialize(pStream, WICBitmapEncoderNoCache);
+  if (FAILED(hr)) goto cleanup;
+
+  hr = pEncoder->CreateNewFrame(&pFrame, &pPropertyBag);
+  if (FAILED(hr)) goto cleanup;
+
+  // Set quality
+  if (pPropertyBag) {
+    PROPBAG2 option = {0};
+    option.pstrName = const_cast<LPOLESTR>(L"ImageQuality");
+    VARIANT value;
+    VariantInit(&value);
+    value.vt = VT_R4;
+    value.fltVal = 0.85f;
+    pPropertyBag->Write(1, &option, &value);
+  }
+
+  hr = pFrame->Initialize(pPropertyBag);
+  if (FAILED(hr)) goto cleanup;
+
+  hr = pFrame->SetSize(width, height);
+  if (FAILED(hr)) goto cleanup;
+
+  {
+    WICPixelFormatGUID pixelFormat = isBGRA ? GUID_WICPixelFormat32bppBGRA : GUID_WICPixelFormat24bppBGR;
+    hr = pFrame->SetPixelFormat(&pixelFormat);
+    if (FAILED(hr)) goto cleanup;
+
+    UINT stride = width * (isBGRA ? 4 : 3);
+    UINT bufferSize = stride * height;
+    hr = pFrame->WritePixels(height, stride, bufferSize, const_cast<BYTE*>(rgbData));
+    if (FAILED(hr)) goto cleanup;
+  }
+
+  hr = pFrame->Commit();
+  if (FAILED(hr)) goto cleanup;
+
+  hr = pEncoder->Commit();
+  if (FAILED(hr)) goto cleanup;
+
+  // Read back from stream
+  {
+    LARGE_INTEGER zero = {0};
+    ULARGE_INTEGER size;
+    pStream->Seek(zero, STREAM_SEEK_END, &size);
+    pStream->Seek(zero, STREAM_SEEK_SET, NULL);
+
+    outBuffer.resize(static_cast<size_t>(size.QuadPart));
+    ULONG bytesRead = 0;
+    hr = pStream->Read(outBuffer.data(), static_cast<ULONG>(size.QuadPart), &bytesRead);
+    if (SUCCEEDED(hr)) outBuffer.resize(bytesRead);
+  }
+
+cleanup:
+  SafeRelease(&pFrame);
+  SafeRelease(&pPropertyBag);
+  SafeRelease(&pEncoder);
+  SafeRelease(&pStream);
+  return hr;
+}
+
+//-------------------------------------------------------------------
+// ConvertFrame - Convert sample to output format
+//-------------------------------------------------------------------
+
+HRESULT CCapture::ConvertFrame(IMFSample* pSample, const GUID& inputSubtype, UINT32 width, UINT32 height, std::vector<uint8_t>& outBuffer) {
+  bool isMjpegOutput = IsEqualGUID(m_outputFormat, MFVideoFormat_MJPG);
+
+  IMFMediaBuffer* pBuffer = NULL;
+  HRESULT hr = pSample->ConvertToContiguousBuffer(&pBuffer);
+  if (FAILED(hr) || !pBuffer) return hr;
+
+  BYTE* pData = NULL;
+  DWORD curLen = 0;
+  hr = pBuffer->Lock(&pData, NULL, &curLen);
+  if (FAILED(hr) || !pData) {
+    SafeRelease(&pBuffer);
+    return hr;
+  }
+
+  if (isMjpegOutput) {
+    // Convert to JPEG
+    // First need to get to RGB format
+    if (IsEqualGUID(inputSubtype, MFVideoFormat_RGB32)) {
+      // BGRA -> JPEG
+      hr = EncodeToJpeg(pData, width, height, true, outBuffer);
+    } else if (IsEqualGUID(inputSubtype, MFVideoFormat_RGB24)) {
+      // BGR24 -> JPEG
+      hr = EncodeToJpeg(pData, width, height, false, outBuffer);
+    } else if (IsEqualGUID(inputSubtype, MFVideoFormat_YUY2)) {
+      // YUY2 -> RGB -> JPEG
+      size_t pixelCount = width * height;
+      m_rgbaBuffer.resize(pixelCount * 3);
+      // Simple YUY2 to BGR conversion
+      for (UINT32 i = 0; i < pixelCount / 2; i++) {
+        int y0 = pData[i * 4 + 0];
+        int u  = pData[i * 4 + 1];
+        int y1 = pData[i * 4 + 2];
+        int v  = pData[i * 4 + 3];
+        int c0 = y0 - 16, c1 = y1 - 16;
+        int d = u - 128, e = v - 128;
+        auto clamp = [](int x) { return x < 0 ? 0 : (x > 255 ? 255 : x); };
+        m_rgbaBuffer[i * 6 + 0] = clamp((298 * c0 + 516 * d + 128) >> 8);           // B
+        m_rgbaBuffer[i * 6 + 1] = clamp((298 * c0 - 100 * d - 208 * e + 128) >> 8); // G
+        m_rgbaBuffer[i * 6 + 2] = clamp((298 * c0 + 409 * e + 128) >> 8);           // R
+        m_rgbaBuffer[i * 6 + 3] = clamp((298 * c1 + 516 * d + 128) >> 8);           // B
+        m_rgbaBuffer[i * 6 + 4] = clamp((298 * c1 - 100 * d - 208 * e + 128) >> 8); // G
+        m_rgbaBuffer[i * 6 + 5] = clamp((298 * c1 + 409 * e + 128) >> 8);           // R
+      }
+      hr = EncodeToJpeg(m_rgbaBuffer.data(), width, height, false, outBuffer);
+    } else if (IsEqualGUID(inputSubtype, MFVideoFormat_NV12)) {
+      // NV12 -> RGB -> JPEG
+      size_t pixelCount = width * height;
+      m_rgbaBuffer.resize(pixelCount * 3);
+      const uint8_t* yPlane = pData;
+      const uint8_t* uvPlane = pData + pixelCount;
+      for (UINT32 row = 0; row < height; row++) {
+        for (UINT32 col = 0; col < width; col++) {
+          int y = yPlane[row * width + col];
+          int uvIdx = (row / 2) * width + (col & ~1);
+          int u = uvPlane[uvIdx] - 128;
+          int v = uvPlane[uvIdx + 1] - 128;
+          int c = y - 16;
+          auto clamp = [](int x) { return x < 0 ? 0 : (x > 255 ? 255 : x); };
+          size_t idx = (row * width + col) * 3;
+          m_rgbaBuffer[idx + 0] = clamp((298 * c + 516 * u + 128) >> 8);           // B
+          m_rgbaBuffer[idx + 1] = clamp((298 * c - 100 * u - 208 * v + 128) >> 8); // G
+          m_rgbaBuffer[idx + 2] = clamp((298 * c + 409 * v + 128) >> 8);           // R
+        }
+      }
+      hr = EncodeToJpeg(m_rgbaBuffer.data(), width, height, false, outBuffer);
+    } else {
+      hr = E_NOTIMPL;
+    }
+  } else {
+    // Other format conversions not implemented yet
+    hr = E_NOTIMPL;
+  }
+
+  pBuffer->Unlock();
+  SafeRelease(&pBuffer);
+  return hr;
+}
 
 //-------------------------------------------------------------------
 // CopyAttribute
